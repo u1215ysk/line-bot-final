@@ -2,4 +2,4 @@ flask
 gunicorn
 line-bot-sdk==3.8.0
 SQLAlchemy==2.0.31
-psycopg2-binary==2.9.9
+psycopg==3.1.18

@@ -25,11 +25,7 @@ channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
 # KoyebのデータベースURL(postgres://)をSQLAlchemyが理解できる形式(postgresql+psycopg2://)に変換
-db_url = os.environ.get('DATABASE_URL')
-if db_url and db_url.startswith("postgres://"):
-    database_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
-else:
-    database_url = db_url
+database_url = os.environ.get('DATABASE_URL')
 
 print("--- 環境変数の読み込み完了 ---")
 
