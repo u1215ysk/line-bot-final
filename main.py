@@ -24,9 +24,13 @@ print("--- 環境変数の読み込み開始 ---")
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
-# KoyebのデータベースURL(postgres://)をSQLAlchemyが理解できる形式(postgresql+psycopg2://)に変換
-database_url = os.environ.get('DATABASE_URL')
-
+# KoyebのデータベースURLをSQLAlchemyが理解できる形式に変換
+db_url = os.environ.get('DATABASE_URL')
+if db_url and db_url.startswith("postgres://"):
+    # "postgres://" を "postgresql+psycopg://" に置換
+    database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+else:
+    database_url = db_url
 print("--- 環境変数の読み込み完了 ---")
 
 if not all([channel_access_token, channel_secret, database_url]):
