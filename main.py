@@ -12,9 +12,8 @@ from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FollowEvent
 )
 
-import sqlalchemy
+from sqlalchemy import create_engine, Column, String, DateTime, func
 from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy import Column, String, DateTime, func
 
 print("--- プログラム開始 ---")
 
@@ -24,7 +23,14 @@ app = Flask(__name__)
 print("--- 環境変数の読み込み開始 ---")
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
-database_url = os.environ.get('DATABASE_URL')
+
+# KoyebのデータベースURL(postgres://)をSQLAlchemyが理解できる形式(postgresql+psycopg2://)に変換
+db_url = os.environ.get('DATABASE_URL')
+if db_url and db_url.startswith("postgres://"):
+    database_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+else:
+    database_url = db_url
+
 print("--- 環境変数の読み込み完了 ---")
 
 if not all([channel_access_token, channel_secret, database_url]):
@@ -45,7 +51,7 @@ class User(Base):
 
 try:
     print("--- データベースエンジン作成開始 ---")
-    engine = sqlalchemy.create_engine(database_url)
+    engine = create_engine(database_url)
     print("--- データベースエンジン作成完了 ---")
     
     print("--- テーブル作成処理開始 ---")
@@ -57,7 +63,6 @@ try:
 except Exception as e:
     print(f"!!! データベース接続またはテーブル作成でエラー: {e}")
     sys.exit(1)
-
 # -------------------------
 
 @app.route("/callback", methods=['POST'])
