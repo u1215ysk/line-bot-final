@@ -26,7 +26,7 @@ channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
-    database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+    database_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
 else:
     database_url = db_url
 print("--- 環境変数の読み込み完了 ---")
@@ -41,9 +41,11 @@ handler = WebhookHandler(channel_secret)
 # --- データベースの設定 ---
 Base = declarative_base()
 
+# ▼ ユーザーテーブルにtags列を追加 ▼
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
+    tags = Column(String, default="") # タグを保存するための列
     created_at = Column(DateTime, server_default=func.now())
 
 try:
@@ -51,9 +53,9 @@ try:
     engine = create_engine(database_url)
     print("--- データベースエンジン作成完了 ---")
     
-    print("--- テーブル作成処理開始 ---")
-    Base.metadata.create_all(engine)
-    print("--- テーブル作成処理完了 ---")
+    print("--- テーブル作成/更新処理開始 ---")
+    Base.metadata.create_all(engine) # テーブル構造の変更を反映
+    print("--- テーブル作成/更新処理完了 ---")
     Session = sessionmaker(bind=engine)
 except Exception as e:
     print(f"!!! データベース接続またはテーブル作成でエラー: {e}")
@@ -70,50 +72,83 @@ def callback():
         abort(400)
     return 'OK'
 
-# --- ▼ メガホン機能（全員にプッシュメッセージ）▼ ---
+# --- ▼ セグメント配信（クーポン希望者向け）▼ ---
+@app.route("/push-coupon", methods=['GET'])
+def push_to_coupon_users():
+    session = Session()
+    # 'coupon'タグを持つユーザーだけを抽出
+    coupon_users = session.query(User).filter(User.tags.like('%coupon%')).all()
+    user_ids = [user.id for user in coupon_users]
+    session.close()
+
+    if not user_ids:
+        return "メッセージを送るクーポン希望者がいません。"
+
+    try:
+        line_bot_api.multicast(
+            user_ids,
+            TextSendMessage(text="クーポンをご希望の方だけに、特別なメッセージをお送りしています！")
+        )
+        return f"メッセージを{len(user_ids)}人のクーポン希望者に送信しました。"
+    except LineBotApiError as e:
+        print(f"!!! メッセージ送信でエラー: {e}")
+        return "メッセージの送信に失敗しました。", 500
+# --- ▲ セグメント配信 ▲ ---
+
 @app.route("/push-message", methods=['GET'])
 def push_to_all_users():
     session = Session()
     all_users = session.query(User).all()
     user_ids = [user.id for user in all_users]
     session.close()
-
-    if not user_ids:
-        return "メッセージを送るユーザーがいません。"
-
+    if not user_ids: return "メッセージを送るユーザーがいません。"
     try:
-        # multicastは最大500人まで同時にメッセージを送れる命令
-        line_bot_api.multicast(
-            user_ids,
-            TextSendMessage(text="これは管理者からのテスト配信です。")
-        )
+        line_bot_api.multicast(user_ids, TextSendMessage(text="これは管理者からのテスト配信です。"))
         return f"メッセージを{len(user_ids)}人のユーザーに送信しました。"
     except LineBotApiError as e:
-        # エラーが発生した場合のログ出力
         print(f"!!! メッセージ送信でエラー: {e}")
         return "メッセージの送信に失敗しました。", 500
-# --- ▲ メガホン機能 ▲ ---
-
 
 @handler.add(FollowEvent)
 def handle_follow(event):
     session = Session()
     user_id = event.source.user_id
-    
     existing_user = session.query(User).filter_by(id=user_id).first()
     if not existing_user:
         new_user = User(id=user_id)
         session.add(new_user)
         session.commit()
         print(f"新しいユーザーが追加されました: {user_id}")
-    
     session.close()
 
+# ▼ メッセージ受信時の処理を改造 ▼
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=event.message.text))
+    user_id = event.source.user_id
+    user_message = event.message.text
+
+    # 「クーポン」というメッセージに反応してタグを付ける
+    if user_message == "クーポン":
+        session = Session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user and "coupon" not in user.tags:
+            user.tags += "coupon," # タグを追加
+            session.commit()
+            reply_text = "クーポン希望者として登録しました！"
+        else:
+            reply_text = "すでに登録済みです。"
+        session.close()
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
+        )
+    else:
+        # 通常のオウム返し
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=user_message)
+        )
 
 @app.route("/", methods=['GET'])
 def health_check():
