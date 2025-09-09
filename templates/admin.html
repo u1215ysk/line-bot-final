@@ -5,45 +5,35 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>管理画面</title>
     <style>
-        body { font-family: sans-serif; margin: 2em; }
-        h1, h2 { color: #333; }
+        body { font-family: sans-serif; margin: 2em; color: #333; }
+        .container { max-width: 800px; margin: auto; }
+        h1, h2 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 2em; }
         th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
         th { background-color: #f2f2f2; }
-        textarea { width: 100%; height: 100px; margin-bottom: 1em; }
-        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; }
+        textarea, input[type="text"] { width: 100%; padding: 8px; margin-bottom: 1em; box-sizing: border-box; }
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; cursor: pointer; border-radius: 4px; }
         button:hover { background-color: #0056b3; }
+        .form-section { background-color: #f9f9f9; padding: 1.5em; border: 1px solid #eee; border-radius: 5px; margin-bottom: 2em;}
     </style>
 </head>
 <body>
-    <h1>LINE Bot 管理画面</h1>
+    <div class="container">
+        <h1>LINE Bot 管理画面</h1>
 
-    <h2><span style="font-size: 1.5em;">👥</span> 友だち一覧</h2>
-    <p>現在 {{ users|length }} 人の友だちがいます。</p>
-    <table>
-        <thead>
-            <tr>
-                <th>ユーザーID</th>
-                <th>登録日時</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for user in users %}
-            <tr>
-                <td>{{ user.id }}</td>
-                <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <hr>
-
-    <h2><span style="font-size: 1.5em;">📣</span> 全員にメッセージを送信</h2>
-    <form action="/send-broadcast" method="post">
-        <textarea name="message" placeholder="ここにメッセージを入力してください..."></textarea>
-        <button type="submit">全員に送信</button>
-    </form>
-
-</body>
-</html>
+        <h2><span style="font-size: 1.5em;">👥</span> 友だち一覧</h2>
+        <p>現在 {{ users|length }} 人の友だちがいます。</p>
+        <table>
+            <thead>
+                <tr>
+                    <th>ユーザーID</th>
+                    <th>タグ</th>
+                    <th>登録日時</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.tags }}</td>
+                    <td>{{ user.created_at.
