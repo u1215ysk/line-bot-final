@@ -24,7 +24,6 @@ app = Flask(__name__)
 print("--- 環境変数の読み込み開始 ---")
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
-satisfied_rich_menu_id = os.environ.get('SATISFIED_RICH_MENU_ID') # ★追加★
 
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
@@ -33,7 +32,7 @@ else:
     database_url = db_url
 print("--- 環境変数の読み込み完了 ---")
 
-if not all([channel_access_token, channel_secret, database_url, satisfied_rich_menu_id]): # ★追加★
+if not all([channel_access_token, channel_secret, database_url]):
     print("!!! エラー: 必要な環境変数が設定されていません。")
     sys.exit(1)
 
@@ -46,16 +45,16 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
-    tags = Column(String, default="")
+    tags = Column(String, default="") # タグを保存するための列
     created_at = Column(DateTime, server_default=func.now())
 
 try:
     print("--- データベースエンジン作成開始 ---")
     engine = create_engine(database_url)
     print("--- データベースエンジン作成完了 ---")
-
+    
     print("--- テーブル作成/更新処理開始 ---")
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine) # テーブル構造の変更を反映
     print("--- テーブル作成/更新処理完了 ---")
     Session = sessionmaker(bind=engine)
 except Exception as e:
@@ -73,9 +72,39 @@ def callback():
         abort(400)
     return 'OK'
 
-# (中略... /push-coupon と /push-message のコードは変更なし)
-# ...
-# ...
+@app.route("/push-coupon", methods=['GET'])
+def push_to_coupon_users():
+    session = Session()
+    coupon_users = session.query(User).filter(User.tags.like('%coupon%')).all()
+    user_ids = [user.id for user in coupon_users]
+    session.close()
+
+    if not user_ids:
+        return "メッセージを送るクーポン希望者がいません。"
+
+    try:
+        line_bot_api.multicast(
+            user_ids,
+            TextSendMessage(text="クーポンをご希望の方だけに、特別なメッセージをお送りしています！")
+        )
+        return f"メッセージを{len(user_ids)}人のクーポン希望者に送信しました。"
+    except LineBotApiError as e:
+        print(f"!!! メッセージ送信でエラー: {e}")
+        return "メッセージの送信に失敗しました。", 500
+
+@app.route("/push-message", methods=['GET'])
+def push_to_all_users():
+    session = Session()
+    all_users = session.query(User).all()
+    user_ids = [user.id for user in all_users]
+    session.close()
+    if not user_ids: return "メッセージを送るユーザーがいません。"
+    try:
+        line_bot_api.multicast(user_ids, TextSendMessage(text="これは管理者からのテスト配信です。"))
+        return f"メッセージを{len(user_ids)}人のユーザーに送信しました。"
+    except LineBotApiError as e:
+        print(f"!!! メッセージ送信でエラー: {e}")
+        return "メッセージの送信に失敗しました。", 500
 
 @handler.add(FollowEvent)
 def handle_follow(event):
@@ -95,35 +124,28 @@ def handle_message(event):
     user_message = event.message.text
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
-
+    
     if user_message == "アンケート":
         quick_reply_buttons = QuickReply(items=[
             QuickReplyButton(action=MessageAction(label="はい", text="はい")),
             QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ")),
         ])
-        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
+        reply_message = TextSendMessage(
+            text="サービスに満足していますか？",
+            quick_reply=quick_reply_buttons
+        )
         line_bot_api.reply_message(event.reply_token, reply_message)
 
     elif user_message == "はい":
-        reply_text = ""
         if user and "satisfied" not in user.tags:
             user.tags += "satisfied,"
             session.commit()
             reply_text = "ありがとうございます！ご回答を記録しました。"
-
-            # ★▼▼▼ リッチメニューを切り替える命令を追加 ▼▼▼★
-            try:
-                line_bot_api.link_rich_menu_to_user(user_id, satisfied_rich_menu_id)
-                print(f"ユーザー({user_id})のリッチメニューを切り替えました。")
-            except LineBotApiError as e:
-                print(f"!!! リッチメニューの切り替えでエラー: {e}")
-            # ★▲▲▲ ここまで追加 ▲▲▲★
         else:
             reply_text = "ご回答ありがとうございます！"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     elif user_message == "いいえ":
-        # (省略...変更なし)
         if user and "unsatisfied" not in user.tags:
             user.tags += "unsatisfied,"
             session.commit()
@@ -131,9 +153,8 @@ def handle_message(event):
         else:
             reply_text = "ご意見ありがとうございます。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
+        
     elif user_message == "クーポン":
-        # (省略...変更なし)
         if user and "coupon" not in user.tags:
             user.tags += "coupon,"
             session.commit()
@@ -143,8 +164,12 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     else:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
-
+        # 通常のオウム返し
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=user_message)
+        )
+    
     session.close()
 
 @app.route("/", methods=['GET'])
