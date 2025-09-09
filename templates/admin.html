@@ -36,4 +36,27 @@
                 <tr>
                     <td>{{ user.id }}</td>
                     <td>{{ user.tags }}</td>
-                    <td>{{ user.created_at.
+                    <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <div class="form-section">
+            <h2><span style="font-size: 1.5em;">🏷️</span> タグで絞って送信</h2>
+            <form action="/send-segmented" method="post">
+                <input type="text" name="tag" placeholder="ここに送信対象のタグを入力 (例: coupon)">
+                <textarea name="message" placeholder="ここにメッセージを入力してください..."></textarea>
+                <button type="submit">このタグを持つ人に送信</button>
+            </form>
+        </div>
+        <div class="form-section">
+            <h2><span style="font-size: 1.5em;">📣</span> 全員にメッセージを送信</h2>
+            <form action="/send-broadcast" method="post">
+                <textarea name="message" placeholder="ここにメッセージを入力してください..."></textarea>
+                <button type="submit">全員に送信</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>
