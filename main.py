@@ -6,7 +6,7 @@ from linebot import (
     LineBotApi, WebhookHandler
 )
 from linebot.exceptions import (
-    InvalidSignatureError
+    InvalidSignatureError, LineBotApiError
 )
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FollowEvent
@@ -24,10 +24,8 @@ print("--- 環境変数の読み込み開始 ---")
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
-# KoyebのデータベースURLをSQLAlchemyが理解できる形式に変換
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
-    # "postgres://" を "postgresql+psycopg://" に置換
     database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
 else:
     database_url = db_url
@@ -43,7 +41,6 @@ handler = WebhookHandler(channel_secret)
 # --- データベースの設定 ---
 Base = declarative_base()
 
-# ユーザー情報を保存するためのテーブル定義
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
@@ -55,11 +52,9 @@ try:
     print("--- データベースエンジン作成完了 ---")
     
     print("--- テーブル作成処理開始 ---")
-    Base.metadata.create_all(engine) # テーブルがなければ作成
+    Base.metadata.create_all(engine)
     print("--- テーブル作成処理完了 ---")
-
     Session = sessionmaker(bind=engine)
-
 except Exception as e:
     print(f"!!! データベース接続またはテーブル作成でエラー: {e}")
     sys.exit(1)
@@ -75,7 +70,31 @@ def callback():
         abort(400)
     return 'OK'
 
-# --- イベントハンドラーの定義 ---
+# --- ▼ メガホン機能（全員にプッシュメッセージ）▼ ---
+@app.route("/push-message", methods=['GET'])
+def push_to_all_users():
+    session = Session()
+    all_users = session.query(User).all()
+    user_ids = [user.id for user in all_users]
+    session.close()
+
+    if not user_ids:
+        return "メッセージを送るユーザーがいません。"
+
+    try:
+        # multicastは最大500人まで同時にメッセージを送れる命令
+        line_bot_api.multicast(
+            user_ids,
+            TextSendMessage(text="これは管理者からのテスト配信です。")
+        )
+        return f"メッセージを{len(user_ids)}人のユーザーに送信しました。"
+    except LineBotApiError as e:
+        # エラーが発生した場合のログ出力
+        print(f"!!! メッセージ送信でエラー: {e}")
+        return "メッセージの送信に失敗しました。", 500
+# --- ▲ メガホン機能 ▲ ---
+
+
 @handler.add(FollowEvent)
 def handle_follow(event):
     session = Session()
