@@ -29,7 +29,7 @@
                     <th>ユーザーID</th>
                     <th>タグ</th>
                     <th>登録日時</th>
-                </tr>
+                    <th>操作</th> </tr>
             </thead>
             <tbody>
                 {% for user in users %}
@@ -37,6 +37,7 @@
                     <td>{{ user.id }}</td>
                     <td>{{ user.tags }}</td>
                     <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
+                    <td><a href="{{ url_for('edit_user_page', user_id=user.id) }}">編集</a></td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -50,6 +51,7 @@
                 <button type="submit">このタグを持つ人に送信</button>
             </form>
         </div>
+        
         <div class="form-section">
             <h2><span style="font-size: 1.5em;">📣</span> 全員にメッセージを送信</h2>
             <form action="/send-broadcast" method="post">

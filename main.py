@@ -16,12 +16,9 @@ from linebot.models import (
 from sqlalchemy import create_engine, Column, String, DateTime, func
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-print("--- プログラム開始 ---")
-
 app = Flask(__name__)
 
 # --- 環境変数から設定を取得 ---
-print("--- 環境変数の読み込み開始 ---")
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
 
@@ -30,7 +27,6 @@ if db_url and db_url.startswith("postgres://"):
     database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
 else:
     database_url = db_url
-print("--- 環境変数の読み込み完了 ---")
 
 if not all([channel_access_token, channel_secret, database_url]):
     print("!!! エラー: 必要な環境変数が設定されていません。")
@@ -41,7 +37,6 @@ handler = WebhookHandler(channel_secret)
 
 # --- データベースの設定 ---
 Base = declarative_base()
-
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
@@ -49,73 +44,73 @@ class User(Base):
     created_at = Column(DateTime, server_default=func.now())
 
 try:
-    print("--- データベースエンジン作成開始 ---")
     engine = create_engine(database_url)
-    print("--- データベースエンジン作成完了 ---")
-    
-    print("--- テーブル作成/更新処理開始 ---")
     Base.metadata.create_all(engine)
-    print("--- テーブル作成/更新処理完了 ---")
     Session = sessionmaker(bind=engine)
 except Exception as e:
     print(f"!!! データベース接続またはテーブル作成でエラー: {e}")
     sys.exit(1)
 # -------------------------
 
-# --- ▼▼▼ 管理画面用のコード ▼▼▼ ---
+# --- ▼▼▼ 管理画面用のコード（編集機能を追加）▼▼▼ ---
 @app.route("/admin")
 def admin_page():
     session = Session()
     all_users = session.query(User).order_by(User.created_at.desc()).all()
     session.close()
-    # templates/admin.html を表示し、ユーザーリストを渡す
     return render_template('admin.html', users=all_users)
+
+@app.route("/edit-user/<user_id>")
+def edit_user_page(user_id):
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    session.close()
+    if not user:
+        return "ユーザーが見つかりません。", 404
+    return render_template('edit_user.html', user=user)
+
+@app.route("/update-user-tags/<user_id>", methods=['POST'])
+def update_user_tags(user_id):
+    new_tags = request.form['tags']
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    if user:
+        user.tags = new_tags
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_page'))
 
 @app.route("/send-broadcast", methods=['POST'])
 def send_broadcast():
     message_text = request.form['message']
     if not message_text:
         return redirect(url_for('admin_page'))
-
     session = Session()
     all_users = session.query(User).all()
     user_ids = [user.id for user in all_users]
     session.close()
-
     if user_ids:
         try:
-            line_bot_api.multicast(
-                user_ids,
-                TextSendMessage(text=message_text)
-            )
+            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
         except LineBotApiError as e:
             print(f"!!! 一斉配信でエラー: {e}")
-
     return redirect(url_for('admin_page'))
 
 @app.route("/send-segmented", methods=['POST'])
 def send_segmented():
     tag = request.form['tag']
     message_text = request.form['message']
-
     if not tag or not message_text:
         return redirect(url_for('admin_page'))
-
     session = Session()
-    # 指定されたタグを持つユーザーをデータベースから検索
     tagged_users = session.query(User).filter(User.tags.like(f'%{tag}%')).all()
     user_ids = [user.id for user in tagged_users]
     session.close()
-
     if user_ids:
         try:
-            line_bot_api.multicast(
-                user_ids,
-                TextSendMessage(text=message_text)
-            )
+            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
         except LineBotApiError as e:
             print(f"!!! セグメント配信でエラー: {e}")
-
     return redirect(url_for('admin_page'))
 # --- ▲▲▲ 管理画面用のコード ▲▲▲ ---
 
@@ -130,34 +125,6 @@ def callback():
         abort(400)
     return 'OK'
 
-
-@app.route("/push-coupon", methods=['GET'])
-def push_to_coupon_users():
-    session = Session()
-    coupon_users = session.query(User).filter(User.tags.like('%coupon%')).all()
-    user_ids = [user.id for user in coupon_users]
-    session.close()
-    if not user_ids: return "メッセージを送るクーポン希望者がいません。"
-    try:
-        line_bot_api.multicast(user_ids, TextSendMessage(text="クーポンをご希望の方だけに、特別なメッセージをお送りしています！"))
-        return f"メッセージを{len(user_ids)}人のクーポン希望者に送信しました。"
-    except LineBotApiError as e:
-        print(f"!!! メッセージ送信でエラー: {e}")
-        return "メッセージの送信に失敗しました。", 500
-
-@app.route("/push-message", methods=['GET'])
-def push_to_all_users():
-    session = Session()
-    all_users = session.query(User).all()
-    user_ids = [user.id for user in all_users]
-    session.close()
-    if not user_ids: return "メッセージを送るユーザーがいません。"
-    try:
-        line_bot_api.multicast(user_ids, TextSendMessage(text="これは管理者からのテスト配信です。"))
-        return f"メッセージを{len(user_ids)}人のユーザーに送信しました。"
-    except LineBotApiError as e:
-        print(f"!!! メッセージ送信でエラー: {e}")
-        return "メッセージの送信に失敗しました。", 500
 
 @handler.add(FollowEvent)
 def handle_follow(event):
@@ -183,10 +150,7 @@ def handle_message(event):
             QuickReplyButton(action=MessageAction(label="はい", text="はい")),
             QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ")),
         ])
-        reply_message = TextSendMessage(
-            text="サービスに満足していますか？",
-            quick_reply=quick_reply_buttons
-        )
+        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
         line_bot_api.reply_message(event.reply_token, reply_message)
 
     elif user_message == "はい":
@@ -217,11 +181,7 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
 
     else:
-        # 通常のオウム返し
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text=user_message)
-        )
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
     
     session.close()
 
@@ -230,6 +190,5 @@ def health_check():
     return 'OK', 200
 
 if __name__ == "__main__":
-    print("--- Flaskサーバー起動準備 ---")
     port = int(os.environ.get("PORT", 8080))
     app.run(host="0.0.0.0", port=port)
