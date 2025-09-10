@@ -13,7 +13,7 @@ from linebot.models import (
     QuickReply, QuickReplyButton, MessageAction
 )
 
-from sqlalchemy import create_engine, Column, String, DateTime, func
+from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 app = Flask(__name__)
@@ -21,7 +21,6 @@ app = Flask(__name__)
 # --- 環境変数から設定を取得 ---
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
 channel_secret = os.environ.get('LINE_CHANNEL_SECRET')
-
 db_url = os.environ.get('DATABASE_URL')
 if db_url and db_url.startswith("postgres://"):
     database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
@@ -43,23 +42,56 @@ class User(Base):
     tags = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
+# ▼▼▼ ステップ配信シナリオを保存するテーブルを新しく定義 ▼▼▼
+class StepMessage(Base):
+    __tablename__ = 'step_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    days_after = Column(Integer, nullable=False)
+    message_text = Column(Text, nullable=False)
+
 try:
     engine = create_engine(database_url)
-    Base.metadata.create_all(engine)
+    Base.metadata.create_all(engine) # 2つのテーブルを自動作成/更新
     Session = sessionmaker(bind=engine)
 except Exception as e:
     print(f"!!! データベース接続またはテーブル作成でエラー: {e}")
     sys.exit(1)
 # -------------------------
 
-# --- ▼▼▼ 管理画面用のコード（編集機能を追加）▼▼▼ ---
+# --- ▼▼▼ 管理画面用のコード（ステップ配信管理機能を追加）▼▼▼ ---
 @app.route("/admin")
 def admin_page():
     session = Session()
     all_users = session.query(User).order_by(User.created_at.desc()).all()
+    step_messages = session.query(StepMessage).order_by(StepMessage.days_after).all()
     session.close()
-    return render_template('admin.html', users=all_users)
+    return render_template('admin.html', users=all_users, step_messages=step_messages)
 
+@app.route("/add-step", methods=['POST'])
+def add_step():
+    days_after = request.form.get('days_after', type=int)
+    message_text = request.form.get('message_text')
+
+    if days_after is not None and message_text:
+        session = Session()
+        new_step = StepMessage(days_after=days_after, message_text=message_text)
+        session.add(new_step)
+        session.commit()
+        session.close()
+    return redirect(url_for('admin_page'))
+
+@app.route("/delete-step/<int:step_id>", methods=['POST'])
+def delete_step(step_id):
+    session = Session()
+    step_to_delete = session.query(StepMessage).filter_by(id=step_id).first()
+    if step_to_delete:
+        session.delete(step_to_delete)
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_page'))
+
+# (省略... ユーザー編集やメッセージ配信のコードは変更ありません)
+# ...
 @app.route("/edit-user/<user_id>")
 def edit_user_page(user_id):
     session = Session()
@@ -115,6 +147,8 @@ def send_segmented():
 # --- ▲▲▲ 管理画面用のコード ▲▲▲ ---
 
 
+# (省略... /callback やイベントハンドラーのコードは変更ありません)
+# ...
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -124,7 +158,6 @@ def callback():
     except InvalidSignatureError:
         abort(400)
     return 'OK'
-
 
 @handler.add(FollowEvent)
 def handle_follow(event):
@@ -150,7 +183,10 @@ def handle_message(event):
             QuickReplyButton(action=MessageAction(label="はい", text="はい")),
             QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ")),
         ])
-        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
+        reply_message = TextSendMessage(
+            text="サービスに満足していますか？",
+            quick_reply=quick_reply_buttons
+        )
         line_bot_api.reply_message(event.reply_token, reply_message)
 
     elif user_message == "はい":
