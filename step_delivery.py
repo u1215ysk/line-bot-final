@@ -31,6 +31,7 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
     tags = Column(String, default="")
+    sent_steps = Column(String, default="") # 送信済みステップを記録 (例: "1,3,")
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -48,28 +49,41 @@ except Exception as e:
     print(f"!!! データベース接続でエラー: {e}")
     sys.exit(1)
 
-# --- ▼▼▼ 配信ロジックをデータベース参照型にアップグレード ▼▼▼ ---
+# --- ▼▼▼ 配信ロジックを「送信済みチェック機能付き」にアップグレード ▼▼▼ ---
 def main():
     today = datetime.utcnow().date()
-    
-    # データベースから有効なシナリオを全て取得
     scenarios = session.query(StepMessage).all()
     print(f"{len(scenarios)}件のシナリオをデータベースから取得しました。")
 
     for scenario in scenarios:
-        # シナリオで指定された日数に基づいて、ターゲットとなる登録日を計算
         target_date = today - timedelta(days=scenario.days_after)
-        
-        # 該当するユーザーを検索
         target_users = session.query(User).filter(func.date(User.created_at) == target_date).all()
         
-        if target_users:
-            user_ids = [user.id for user in target_users]
+        if not target_users:
+            continue
+
+        users_to_send = []
+        # 送信対象の中から、まだこのステップを送られていない人だけを絞り込む
+        for user in target_users:
+            sent_steps_list = user.sent_steps.split(',')
+            if str(scenario.days_after) not in sent_steps_list:
+                users_to_send.append(user)
+        
+        if users_to_send:
+            user_ids_to_send = [user.id for user in users_to_send]
             try:
-                print(f"登録{scenario.days_after}日後の{len(user_ids)}人にメッセージを送信します: {scenario.message_text}")
-                line_bot_api.multicast(user_ids, TextSendMessage(text=scenario.message_text))
+                print(f"登録{scenario.days_after}日後の{len(user_ids_to_send)}人にメッセージを送信します...")
+                line_bot_api.multicast(user_ids_to_send, TextSendMessage(text=scenario.message_text))
+                
+                # 送信成功後、データベースに「送信済み」の記録を付ける
+                for user in users_to_send:
+                    user.sent_steps += f"{scenario.days_after},"
+                session.commit()
+                print("送信記録をデータベースに保存しました。")
+
             except LineBotApiError as e:
                 print(f"!!! シナリオ(ID: {scenario.id})のメッセージ送信でエラー: {e}")
+                session.rollback() # 送信に失敗した場合は、記録を付けない
 
     session.close()
     print("--- ステップ配信バッチ終了 ---")

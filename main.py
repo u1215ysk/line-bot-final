@@ -44,6 +44,7 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
     tags = Column(String, default="")
+    sent_steps = Column(String, default="") # ▼ 追加 ▼
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
