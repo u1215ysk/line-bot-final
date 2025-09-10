@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}管理画面{% endblock %}</title>
+    <style>
+        body { font-family: sans-serif; margin: 0; color: #333; background-color: #f4f7f6; }
+        .sidebar { width: 220px; background-color: #333; color: white; position: fixed; height: 100%; padding-top: 20px; }
+        .sidebar h1 { text-align: center; color: #fff; margin-bottom: 30px; }
+        .sidebar a { display: block; color: white; padding: 15px 20px; text-decoration: none; }
+        .sidebar a:hover, .sidebar a.active { background-color: #555; }
+        .main-content { margin-left: 240px; padding: 2em; }
+        h2 { border-bottom: 2px solid #007bff; padding-bottom: 10px; }
+        /* (省略...テーブルやフォームのスタイルは変更ありません) */
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1>管理メニュー</h1>
+        <a href="{{ url_for('admin_friends_page') }}" class="{% if request.endpoint == 'admin_friends_page' %}active{% endif %}">👥 友だち一覧</a>
+        <a href="{{ url_for('admin_steps_page') }}" class="{% if request.endpoint == 'admin_steps_page' %}active{% endif %}">🗓️ ステップ配信</a>
+    </div>
+
+    <div class="main-content">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

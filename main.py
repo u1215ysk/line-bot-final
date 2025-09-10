@@ -44,7 +44,6 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
     tags = Column(String, default="")
-    sent_steps = Column(String, default="") # ▼ 追加 ▼
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -62,7 +61,7 @@ except Exception as e:
     sys.exit(1)
 # -------------------------
 
-# --- ▼▼▼ ベーシック認証用のコード ▼▼▼ ---
+# --- ベーシック認証用のコード ---
 def check_auth(username, password):
     return username == admin_username and password == admin_password
 
@@ -80,17 +79,30 @@ def auth_required(f):
             return authenticate()
         return f(*args, **kwargs)
     return decorated
-# --- ▲▲▲ ベーシック認証用のコード ▲▲▲ ---
+# -------------------------
 
-# --- 管理画面用のコード ---
+# --- 管理画面用のコード（ページ分割に対応）---
 @app.route("/admin")
 @auth_required
-def admin_page():
+def admin_dashboard():
+    # /admin のトップは友だち一覧へリダイレクト
+    return redirect(url_for('admin_friends_page'))
+
+@app.route("/admin/friends")
+@auth_required
+def admin_friends_page():
     session = Session()
     all_users = session.query(User).order_by(User.created_at.desc()).all()
+    session.close()
+    return render_template('friends.html', users=all_users)
+
+@app.route("/admin/steps")
+@auth_required
+def admin_steps_page():
+    session = Session()
     step_messages = session.query(StepMessage).order_by(StepMessage.days_after).all()
     session.close()
-    return render_template('admin.html', users=all_users, step_messages=step_messages)
+    return render_template('steps.html', step_messages=step_messages)
 
 @app.route("/edit-user/<user_id>")
 @auth_required
@@ -112,7 +124,7 @@ def update_user_tags(user_id):
         user.tags = new_tags
         session.commit()
     session.close()
-    return redirect(url_for('admin_page'))
+    return redirect(url_for('admin_friends_page'))
 
 @app.route("/add-step", methods=['POST'])
 @auth_required
@@ -125,7 +137,7 @@ def add_step():
         session.add(new_step)
         session.commit()
         session.close()
-    return redirect(url_for('admin_page'))
+    return redirect(url_for('admin_steps_page'))
 
 @app.route("/delete-step/<int:step_id>", methods=['POST'])
 @auth_required
@@ -136,45 +148,9 @@ def delete_step(step_id):
         session.delete(step_to_delete)
         session.commit()
     session.close()
-    return redirect(url_for('admin_page'))
+    return redirect(url_for('admin_steps_page'))
 
-@app.route("/send-broadcast", methods=['POST'])
-@auth_required
-def send_broadcast():
-    message_text = request.form['message']
-    if not message_text:
-        return redirect(url_for('admin_page'))
-    session = Session()
-    all_users = session.query(User).all()
-    user_ids = [user.id for user in all_users]
-    session.close()
-    if user_ids:
-        try:
-            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
-        except LineBotApiError as e:
-            print(f"!!! 一斉配信でエラー: {e}")
-    return redirect(url_for('admin_page'))
-
-@app.route("/send-segmented", methods=['POST'])
-@auth_required
-def send_segmented():
-    tag = request.form['tag']
-    message_text = request.form['message']
-    if not tag or not message_text:
-        return redirect(url_for('admin_page'))
-    session = Session()
-    tagged_users = session.query(User).filter(User.tags.like(f'%{tag}%')).all()
-    user_ids = [user.id for user in tagged_users]
-    session.close()
-    if user_ids:
-        try:
-            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
-        except LineBotApiError as e:
-            print(f"!!! セグメント配信でエラー: {e}")
-    return redirect(url_for('admin_page'))
-
-
-# --- LINE Bot本体の機能（認証は不要） ---
+# --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers['X-Line-Signature']
@@ -209,7 +185,10 @@ def handle_message(event):
             QuickReplyButton(action=MessageAction(label="はい", text="はい")),
             QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ")),
         ])
-        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
+        reply_message = TextSendMessage(
+            text="サービスに満足していますか？",
+            quick_reply=quick_reply_buttons
+        )
         line_bot_api.reply_message(event.reply_token, reply_message)
 
     elif user_message == "はい":
