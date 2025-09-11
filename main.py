@@ -1,7 +1,7 @@
 import os
 import sys
 from functools import wraps
-from flask import Flask, request, abort, render_template, redirect, url_for, Response
+from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify # jsonifyを追加
 
 from linebot import (
     LineBotApi, WebhookHandler
@@ -130,7 +130,8 @@ def update_user(user_id):
         user.tags = request.form['tags']
         session.commit()
     session.close()
-    return redirect(url_for('admin_friends_page'))
+    # ▼▼▼ 応答をリダイレクトからJSONに変更 ▼▼▼
+    return jsonify({'status': 'success'})
 
 @app.route("/add-step", methods=['POST'])
 @auth_required

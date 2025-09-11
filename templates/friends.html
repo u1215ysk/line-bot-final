@@ -23,10 +23,68 @@
                 <td>{{ user.nickname or '-' }}</td>
                 <td>{{ user.tags or '-' }}</td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td><a href="{{ url_for('edit_user_page', user_id=user.id) }}" class="button" style="background-color:#6c757d;">編集</a></td>
+                <td><button onclick="openEditModal('{{ url_for('edit_user_page', user_id=user.id) }}')">編集</button></td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<style>
+    .modal-backdrop {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.5); display: none;
+        justify-content: center; align-items: center; z-index: 1000;
+    }
+    .modal-content {
+        background-color: white; padding: 2em; border-radius: 8px;
+        width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    }
+</style>
+
+<div id="edit-modal-backdrop" class="modal-backdrop" onclick="closeEditModal(event)">
+    <div id="edit-modal-content" class="modal-content" onclick="event.stopPropagation()">
+        </div>
+</div>
+<script>
+    const modalBackdrop = document.getElementById('edit-modal-backdrop');
+    const modalContent = document.getElementById('edit-modal-content');
+
+    // モーダルを開く関数
+    async function openEditModal(url) {
+        const response = await fetch(url); // 編集ページのHTMLを裏で取得
+        modalContent.innerHTML = await response.text();
+        modalBackdrop.style.display = 'flex';
+        
+        // フォームの送信を乗っ取る
+        const form = document.getElementById('edit-form');
+        form.addEventListener('submit', handleFormSubmit);
+    }
+
+    // モーダルを閉じる関数
+    function closeEditModal(event) {
+        if (event.target === modalBackdrop) {
+            modalBackdrop.style.display = 'none';
+        }
+    }
+    
+    // フォーム送信時の処理
+    async function handleFormSubmit(event) {
+        event.preventDefault(); // 通常のページ遷移を停止
+        const form = event.target;
+        const formData = new FormData(form);
+        
+        const response = await fetch(form.action, {
+            method: 'POST',
+            body: formData,
+        });
+        
+        if (response.ok) {
+            // 成功したら、ページ全体をリロードして変更を反映
+            window.location.reload();
+        } else {
+            alert('更新に失敗しました。');
+        }
+    }
+</script>
 {% endblock %}
