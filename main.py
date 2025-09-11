@@ -178,39 +178,19 @@ def admin_settings_page():
     session.close()
     return render_template('settings.html', token=token_setting, secret=secret_setting)
 
-# ▼▼▼ /admin/chat 関数を改造 ▼▼▼
 @app.route("/admin/chat")
 @auth_required
 def admin_chat_page():
     session = Session()
     status_filter = request.args.get('status')
-    
-    # ベースとなるクエリを作成
     query = session.query(User)
     if status_filter:
         query = query.filter(User.status == status_filter)
-    
-    # ユーザーリストを取得
     all_users = query.order_by(User.created_at.desc()).all()
-    
-    # 各ユーザーの最新メッセージを取得するためのサブクエリ
-    latest_message_subq = session.query(
-        Message.user_id,
-        func.max(Message.created_at).label('max_created_at')
-    ).group_by(Message.user_id).subquery()
-
-    # 最新メッセージの情報を取得
-    latest_messages_q = session.query(Message).join(
-        latest_message_subq,
-        (Message.user_id == latest_message_subq.c.user_id) &
-        (Message.created_at == latest_message_subq.c.max_created_at)
-    )
-    
-    # ユーザーIDをキー、最新メッセージオブジェクトを値とする辞書を作成
+    latest_message_subq = session.query(Message.user_id, func.max(Message.created_at).label('max_created_at')).group_by(Message.user_id).subquery()
+    latest_messages_q = session.query(Message).join(latest_message_subq, (Message.user_id == latest_message_subq.c.user_id) & (Message.created_at == latest_message_subq.c.max_created_at))
     latest_messages = {msg.user_id: msg for msg in latest_messages_q}
-
     session.close()
-    
     return render_template('chat.html', users=all_users, current_filter=status_filter, latest_messages=latest_messages)
 
 @app.route("/admin/chat/<user_id>")
@@ -228,27 +208,35 @@ def admin_chat_detail_page(user_id):
 @auth_required
 def send_reply(user_id):
     line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        return "アクセストークンが設定されていません。", 500
-
+    if not line_bot_api: return "アクセストークンが設定されていません。", 500
     reply_text = request.form.get('message_text')
     if not reply_text:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-
     try:
         line_bot_api.push_message(user_id, TextSendMessage(text=reply_text))
     except LineBotApiError as e:
         print(f"!!! 個別返信の送信でエラー: {e}")
         return "LINEへのメッセージ送信に失敗しました。", 500
-
     session = Session()
     new_message = Message(user_id=user_id, sender_type='admin', content=reply_text)
     session.add(new_message)
     session.commit()
     session.close()
-    
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
+# ▼▼▼ 抜け落ちていた関数をここに追加 ▼▼▼
+@app.route("/update-status/<user_id>", methods=['POST'])
+@auth_required
+def update_status(user_id):
+    new_status = request.form.get('status')
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    if user and new_status:
+        user.status = new_status
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+# ▲▲▲ ここまで追加 ▲▲▲
 
 @app.route("/edit-user/<user_id>")
 @auth_required
