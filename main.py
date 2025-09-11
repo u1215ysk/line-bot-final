@@ -41,7 +41,7 @@ class User(Base):
     display_name = Column(String)
     nickname = Column(String)
     tags = Column(String, default="")
-    status = Column(String, default="未対応") # ▼ 追加 ▼
+    status = Column(String, default="未対応")
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -178,22 +178,40 @@ def admin_settings_page():
     session.close()
     return render_template('settings.html', token=token_setting, secret=secret_setting)
 
+# ▼▼▼ /admin/chat 関数を改造 ▼▼▼
 @app.route("/admin/chat")
 @auth_required
 def admin_chat_page():
     session = Session()
-    # URLの?status=... の部分を取得
     status_filter = request.args.get('status')
     
+    # ベースとなるクエリを作成
     query = session.query(User)
     if status_filter:
         query = query.filter(User.status == status_filter)
-        
+    
+    # ユーザーリストを取得
     all_users = query.order_by(User.created_at.desc()).all()
+    
+    # 各ユーザーの最新メッセージを取得するためのサブクエリ
+    latest_message_subq = session.query(
+        Message.user_id,
+        func.max(Message.created_at).label('max_created_at')
+    ).group_by(Message.user_id).subquery()
+
+    # 最新メッセージの情報を取得
+    latest_messages_q = session.query(Message).join(
+        latest_message_subq,
+        (Message.user_id == latest_message_subq.c.user_id) &
+        (Message.created_at == latest_message_subq.c.max_created_at)
+    )
+    
+    # ユーザーIDをキー、最新メッセージオブジェクトを値とする辞書を作成
+    latest_messages = {msg.user_id: msg for msg in latest_messages_q}
+
     session.close()
     
-    # フィルタリング中のステータスをテンプレートに渡す
-    return render_template('chat.html', users=all_users, current_filter=status_filter)
+    return render_template('chat.html', users=all_users, current_filter=status_filter, latest_messages=latest_messages)
 
 @app.route("/admin/chat/<user_id>")
 @auth_required
@@ -206,7 +224,6 @@ def admin_chat_detail_page(user_id):
         return "ユーザーが見つかりません。", 404
     return render_template('chat_detail.html', user=user, messages=messages)
 
-# --- ▼▼▼ 個別トーク返信用の関数 ▼▼▼ ---
 @app.route("/admin/chat/<user_id>/send", methods=['POST'])
 @auth_required
 def send_reply(user_id):
@@ -218,27 +235,20 @@ def send_reply(user_id):
     if not reply_text:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
-    # 1. LINEにプッシュメッセージを送信
     try:
         line_bot_api.push_message(user_id, TextSendMessage(text=reply_text))
     except LineBotApiError as e:
         print(f"!!! 個別返信の送信でエラー: {e}")
         return "LINEへのメッセージ送信に失敗しました。", 500
 
-    # 2. 送信したメッセージをDBに保存
     session = Session()
-    new_message = Message(
-        user_id=user_id,
-        sender_type='admin',
-        content=reply_text
-    )
+    new_message = Message(user_id=user_id, sender_type='admin', content=reply_text)
     session.add(new_message)
     session.commit()
     session.close()
     
-    # 3. 元のチャット画面にリダイレクト
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-# --- ▲▲▲ ここまで追加 ▲▲▲ ---
+
 
 @app.route("/edit-user/<user_id>")
 @auth_required
@@ -263,18 +273,6 @@ def update_user(user_id):
         session.commit()
     session.close()
     return redirect(url_for('admin_friends_page'))
-
-@app.route("/update-status/<user_id>", methods=['POST'])
-@auth_required
-def update_status(user_id):
-    new_status = request.form.get('status')
-    session = Session()
-    user = session.query(User).filter_by(id=user_id).first()
-    if user and new_status:
-        user.status = new_status
-        session.commit()
-    session.close()
-    return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
 @app.route("/add-step", methods=['POST'])
 @auth_required
@@ -377,7 +375,6 @@ def callback():
         user_message = event.message.text
         session = Session()
         
-        # 受信メッセージをDBに保存
         new_message = Message(user_id=user_id, sender_type='user', content=user_message)
         session.add(new_message)
         session.commit()

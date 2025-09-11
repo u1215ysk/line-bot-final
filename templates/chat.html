@@ -7,6 +7,8 @@
     .filter-nav { margin-bottom: 1em; }
     .filter-nav a { margin-right: 10px; padding: 8px 12px; border-radius: 4px; text-decoration: none; background-color: #e9ecef; color: #495057; }
     .filter-nav a.active { background-color: var(--primary-color); color: white; font-weight: bold; }
+    tr[data-href] { cursor: pointer; }
+    .message-preview { color: #6c757d; font-size: 0.9em; }
 </style>
 
 <div class="content-panel">
@@ -19,25 +21,50 @@
         <a href="{{ url_for('admin_chat_page', status='要対応') }}" class="{{ 'active' if current_filter == '要対応' }}">要対応</a>
         <a href="{{ url_for('admin_chat_page', status='対応済み') }}" class="{{ 'active' if current_filter == '対応済み' }}">対応済み</a>
     </div>
+
     <table>
         <thead>
             <tr>
                 <th>ステータス</th>
                 <th>LINE表示名</th>
-                <th>ニックネーム</th>
-                <th>最終メッセージ日時</th>
+                <th>最終メッセージ</th>
+                <th>日時</th>
             </tr>
         </thead>
         <tbody>
             {% for user in users %}
-            <tr style="cursor: pointer;" onclick="window.location='{{ url_for('admin_chat_detail_page', user_id=user.id) }}';">
+            <tr data-href="{{ url_for('admin_chat_detail_page', user_id=user.id) }}">
                 <td>{{ user.status }}</td>
-                <td>{{ user.display_name }}</td>
-                <td>{{ user.nickname or '-' }}</td>
-                <td>(ここに最終メッセージ日時)</td>
+                <td>{{ user.nickname or user.display_name }}</td>
+                <td>
+                    {% if latest_messages.get(user.id) %}
+                        <span class="message-preview">{{ latest_messages[user.id].content | truncate(30) }}</span>
+                    {% else %}
+                        <span class="message-preview">まだメッセージはありません</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if latest_messages.get(user.id) %}
+                        {{ latest_messages[user.id].created_at.strftime('%m-%d %H:%M') }}
+                    {% else %}
+                        -
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
 </div>
+
+<script>
+    // テーブルの行がクリックされたら、詳細ページに飛ぶようにする
+    document.addEventListener('DOMContentLoaded', () => {
+        const rows = document.querySelectorAll('tr[data-href]');
+        rows.forEach(row => {
+            row.addEventListener('click', () => {
+                window.location.href = row.dataset.href;
+            });
+        });
+    });
+</script>
 {% endblock %}
