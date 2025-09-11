@@ -20,9 +20,10 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 app = Flask(__name__)
 
 # --- 環境変数から設定を取得 ---
+db_url = os.environ.get('DATABASE_URL')
 admin_username = os.environ.get('ADMIN_USERNAME')
 admin_password = os.environ.get('ADMIN_PASSWORD')
-db_url = os.environ.get('DATABASE_URL')
+
 if db_url and db_url.startswith("postgres://"):
     database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
 else:
@@ -116,13 +117,11 @@ def admin_steps_page():
 def admin_messaging_page():
     return render_template('messaging.html')
 
-# ▼▼▼ /admin/settings のリダイレクトを解除し、本格的な実装に変更 ▼▼▼
 @app.route("/admin/settings", methods=['GET', 'POST'])
 @auth_required
 def admin_settings_page():
     session = Session()
     if request.method == 'POST':
-        # フォームから送信された値で設定を更新または作成
         settings_keys = ['line_channel_access_token', 'line_channel_secret']
         for key in settings_keys:
             setting = session.query(Setting).filter_by(key=key).first()
@@ -132,12 +131,9 @@ def admin_settings_page():
             setting.value = request.form.get(key)
         session.commit()
         return redirect(url_for('admin_settings_page'))
-
-    # 現在の設定をDBから取得して表示
     token_setting = session.query(Setting).filter_by(key='line_channel_access_token').first()
     secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
     session.close()
-    
     return render_template('settings.html', token=token_setting, secret=secret_setting)
 
 @app.route("/edit-user/<user_id>")
@@ -263,6 +259,7 @@ def callback():
         user_message = event.message.text
         session = Session()
         user = session.query(User).filter_by(id=user_id).first()
+
         if user_message == "アンケート":
             quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
             reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
@@ -276,4 +273,39 @@ def callback():
                 reply_text = "ご回答ありがとうございます！"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         elif user_message == "いいえ":
-            if user and "unsatisfied" not
+            # ▼▼▼ ここの行が正しく修正されています ▼▼▼
+            if user and "unsatisfied" not in user.tags:
+                user.tags += "unsatisfied,"
+                session.commit()
+                reply_text = "ご意見ありがとうございます。今後の参考にさせていただきます。"
+            else:
+                reply_text = "ご意見ありがとうございます。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        elif user_message == "クーポン":
+            if user and "coupon" not in user.tags:
+                user.tags += "coupon,"
+                session.commit()
+                reply_text = "クーポン希望者として登録しました！"
+            else:
+                reply_text = "すでに登録済みです。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
+        session.close()
+
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
+
+@app.route("/", methods=['GET'])
+def health_check():
+    return 'OK'
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
