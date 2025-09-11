@@ -43,8 +43,8 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
-    display_name = Column(String) # ▼ 追加 ▼
-    nickname = Column(String)     # ▼ 追加 ▼
+    display_name = Column(String)
+    nickname = Column(String)
     tags = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
@@ -83,11 +83,10 @@ def auth_required(f):
     return decorated
 # -------------------------
 
-# --- 管理画面用のコード（ページ分割に対応）---
+# --- 管理画面用のコード ---
 @app.route("/admin")
 @auth_required
 def admin_dashboard():
-    # /admin のトップは友だち一覧へリダイレクト
     return redirect(url_for('admin_friends_page'))
 
 @app.route("/admin/friends")
@@ -106,6 +105,11 @@ def admin_steps_page():
     session.close()
     return render_template('steps.html', step_messages=step_messages)
 
+@app.route("/admin/messaging")
+@auth_required
+def admin_messaging_page():
+    return render_template('messaging.html')
+
 @app.route("/edit-user/<user_id>")
 @auth_required
 def edit_user_page(user_id):
@@ -119,13 +123,11 @@ def edit_user_page(user_id):
 @app.route("/update-user/<user_id>", methods=['POST'])
 @auth_required
 def update_user(user_id):
-    new_nickname = request.form['nickname']
-    new_tags = request.form['tags']
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
     if user:
-        user.nickname = new_nickname
-        user.tags = new_tags
+        user.nickname = request.form['nickname']
+        user.tags = request.form['tags']
         session.commit()
     session.close()
     return redirect(url_for('admin_friends_page'))
@@ -153,15 +155,48 @@ def delete_step(step_id):
         session.commit()
     session.close()
     return redirect(url_for('admin_steps_page'))
-
-@app.route("/admin/messaging")
+    
+# ▼▼▼ 抜け落ちていた2つの関数をここに追加 ▼▼▼
+@app.route("/send-broadcast", methods=['POST'])
 @auth_required
-def admin_messaging_page():
-    return render_template('messaging.html')
+def send_broadcast():
+    message_text = request.form.get('message')
+    if not message_text:
+        return redirect(url_for('admin_messaging_page'))
+    session = Session()
+    all_users = session.query(User).all()
+    user_ids = [user.id for user in all_users]
+    session.close()
+    if user_ids:
+        try:
+            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
+        except LineBotApiError as e:
+            print(f"!!! 一斉配信でエラー: {e}")
+    return redirect(url_for('admin_messaging_page'))
+
+@app.route("/send-segmented", methods=['POST'])
+@auth_required
+def send_segmented():
+    tag = request.form.get('tag')
+    message_text = request.form.get('message')
+    if not tag or not message_text:
+        return redirect(url_for('admin_messaging_page'))
+    session = Session()
+    tagged_users = session.query(User).filter(User.tags.like(f'%{tag}%')).all()
+    user_ids = [user.id for user in tagged_users]
+    session.close()
+    if user_ids:
+        try:
+            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
+        except LineBotApiError as e:
+            print(f"!!! セグメント配信でエラー: {e}")
+    return redirect(url_for('admin_messaging_page'))
+# ▲▲▲ ここまで追加 ▲▲▲
 
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
+    # (省略...この部分は変更ありません)
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
@@ -174,46 +209,31 @@ def callback():
 def handle_follow(event):
     user_id = event.source.user_id
     session = Session()
-
-    # プロフィール情報を取得
     try:
         profile = line_bot_api.get_profile(user_id)
         display_name = profile.display_name
     except LineBotApiError as e:
         print(f"!!! プロフィール取得でエラー: {e}")
         display_name = "取得失敗"
-
-    # ユーザーが既に存在するか確認
     existing_user = session.query(User).filter_by(id=user_id).first()
     if not existing_user:
-        new_user = User(
-            id=user_id,
-            display_name=display_name
-        )
+        new_user = User(id=user_id, display_name=display_name)
         session.add(new_user)
         session.commit()
         print(f"新しいユーザーが追加されました: {user_id} ({display_name})")
-
     session.close()
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    # (省略...この部分は変更ありません)
     user_id = event.source.user_id
     user_message = event.message.text
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
-    
     if user_message == "アンケート":
-        quick_reply_buttons = QuickReply(items=[
-            QuickReplyButton(action=MessageAction(label="はい", text="はい")),
-            QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ")),
-        ])
-        reply_message = TextSendMessage(
-            text="サービスに満足していますか？",
-            quick_reply=quick_reply_buttons
-        )
+        quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
+        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
         line_bot_api.reply_message(event.reply_token, reply_message)
-
     elif user_message == "はい":
         if user and "satisfied" not in user.tags:
             user.tags += "satisfied,"
@@ -222,7 +242,6 @@ def handle_message(event):
         else:
             reply_text = "ご回答ありがとうございます！"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
     elif user_message == "いいえ":
         if user and "unsatisfied" not in user.tags:
             user.tags += "unsatisfied,"
@@ -231,7 +250,6 @@ def handle_message(event):
         else:
             reply_text = "ご意見ありがとうございます。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        
     elif user_message == "クーポン":
         if user and "coupon" not in user.tags:
             user.tags += "coupon,"
@@ -240,10 +258,8 @@ def handle_message(event):
         else:
             reply_text = "すでに登録済みです。"
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-
     else:
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
-    
     session.close()
 
 @app.route("/", methods=['GET'])
@@ -252,4 +268,4 @@ def health_check():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.host", port=port)
