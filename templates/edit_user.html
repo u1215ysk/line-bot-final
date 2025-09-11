@@ -41,7 +41,7 @@
         <h2><span style="font-size: 1.2em;">👤</span> ユーザー情報</h2>
         
         <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
-        <p style="font-size: 0.9em; color: #666;"><strong>ユーザーID:</strong> {{ user.id }}</p>
+        <p><strong>ユーザーID:</strong> <span class="user-id-display">{{ user.id }}</span></p>
 
         <label for="nickname"><strong>管理用ニックネーム:</strong></label>
         <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">

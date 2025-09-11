@@ -178,6 +178,7 @@ def edit_user_page(user_id):
     session.close()
     if not user:
         return "ユーザーが見つかりません。", 404
+    # edit_user.htmlにall_tagsも渡す
     return render_template('edit_user.html', user=user, all_tags=all_tags)
 
 @app.route("/update-user/<user_id>", methods=['POST'])
