@@ -41,6 +41,7 @@ class User(Base):
     display_name = Column(String)
     nickname = Column(String)
     tags = Column(String, default="")
+    status = Column(String, default="未対応") # ▼ 追加 ▼
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -181,9 +182,18 @@ def admin_settings_page():
 @auth_required
 def admin_chat_page():
     session = Session()
-    all_users = session.query(User).order_by(User.created_at.desc()).all()
+    # URLの?status=... の部分を取得
+    status_filter = request.args.get('status')
+    
+    query = session.query(User)
+    if status_filter:
+        query = query.filter(User.status == status_filter)
+        
+    all_users = query.order_by(User.created_at.desc()).all()
     session.close()
-    return render_template('chat.html', users=all_users)
+    
+    # フィルタリング中のステータスをテンプレートに渡す
+    return render_template('chat.html', users=all_users, current_filter=status_filter)
 
 @app.route("/admin/chat/<user_id>")
 @auth_required
@@ -253,6 +263,18 @@ def update_user(user_id):
         session.commit()
     session.close()
     return redirect(url_for('admin_friends_page'))
+
+@app.route("/update-status/<user_id>", methods=['POST'])
+@auth_required
+def update_status(user_id):
+    new_status = request.form.get('status')
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    if user and new_status:
+        user.status = new_status
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
 @app.route("/add-step", methods=['POST'])
 @auth_required

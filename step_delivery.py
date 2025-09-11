@@ -33,6 +33,7 @@ class User(Base):
     display_name = Column(String) # ▼ 追加 ▼
     nickname = Column(String)     # ▼ 追加 ▼    
     tags = Column(String, default="")
+    status = Column(String, default="未対応") # ▼ 追加 ▼
     sent_steps = Column(String, default="") # 送信済みステップを記録 (例: "1,3,")
     created_at = Column(DateTime, server_default=func.now())
 
