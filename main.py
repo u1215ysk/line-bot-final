@@ -63,7 +63,7 @@ class Message(Base):
     __tablename__ = 'messages'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, nullable=False)
-    sender_type = Column(String, nullable=False)  # 'user' or 'admin'
+    sender_type = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
@@ -195,6 +195,40 @@ def admin_chat_detail_page(user_id):
     if not user:
         return "ユーザーが見つかりません。", 404
     return render_template('chat_detail.html', user=user, messages=messages)
+
+# --- ▼▼▼ 個別トーク返信用の関数 ▼▼▼ ---
+@app.route("/admin/chat/<user_id>/send", methods=['POST'])
+@auth_required
+def send_reply(user_id):
+    line_bot_api = get_line_bot_api()
+    if not line_bot_api:
+        return "アクセストークンが設定されていません。", 500
+
+    reply_text = request.form.get('message_text')
+    if not reply_text:
+        return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+
+    # 1. LINEにプッシュメッセージを送信
+    try:
+        line_bot_api.push_message(user_id, TextSendMessage(text=reply_text))
+    except LineBotApiError as e:
+        print(f"!!! 個別返信の送信でエラー: {e}")
+        return "LINEへのメッセージ送信に失敗しました。", 500
+
+    # 2. 送信したメッセージをDBに保存
+    session = Session()
+    new_message = Message(
+        user_id=user_id,
+        sender_type='admin',
+        content=reply_text
+    )
+    session.add(new_message)
+    session.commit()
+    session.close()
+    
+    # 3. 元のチャット画面にリダイレクト
+    return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+# --- ▲▲▲ ここまで追加 ▲▲▲ ---
 
 @app.route("/edit-user/<user_id>")
 @auth_required
