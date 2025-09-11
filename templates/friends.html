@@ -1,29 +1,32 @@
 {% extends "layout.html" %}
 {% block title %}友だち一覧{% endblock %}
+{% block header %}友だち一覧{% endblock %}
 
 {% block content %}
-<h2><span style="font-size: 1.5em;">👥</span> 友だち一覧</h2>
-<p>現在 {{ users|length }} 人の友だちがいます。</p>
-<table>
-    <thead>
-        <tr>
-            <th>LINE表示名</th>
-            <th>ニックネーム</th>
-            <th>タグ</th>
-            <th>登録日時</th>
-            <th>操作</th>
-        </tr>
-    </thead>
-    <tbody>
-        {% for user in users %}
-        <tr>
-            <td>{{ user.display_name }}</td>
-            <td>{{ user.nickname }}</td>
-            <td>{{ user.tags }}</td>
-            <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
-            <td><a href="{{ url_for('edit_user_page', user_id=user.id) }}">編集</a></td>
-        </tr>
-        {% endfor %}
-    </tbody>
-</table>
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">👥</span> 登録ユーザー</h2>
+    <p>現在 {{ users|length }} 人の友だちがいます。</p>
+    <table>
+        <thead>
+            <tr>
+                <th>LINE表示名</th>
+                <th>ニックネーム</th>
+                <th>タグ</th>
+                <th>登録日時</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.display_name }}</td>
+                <td>{{ user.nickname or '-' }}</td>
+                <td>{{ user.tags or '-' }}</td>
+                <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td><a href="{{ url_for('edit_user_page', user_id=user.id) }}" class="button" style="background-color:#6c757d;">編集</a></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 {% endblock %}

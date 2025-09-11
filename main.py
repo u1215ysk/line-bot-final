@@ -154,6 +154,11 @@ def delete_step(step_id):
     session.close()
     return redirect(url_for('admin_steps_page'))
 
+@app.route("/admin/messaging")
+@auth_required
+def admin_messaging_page():
+    return render_template('messaging.html')
+
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():

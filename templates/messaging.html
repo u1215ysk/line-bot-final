@@ -1,0 +1,25 @@
+{% extends "layout.html" %}
+{% block title %}メッセージ配信{% endblock %}
+{% block header %}メッセージ配信{% endblock %}
+
+{% block content %}
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">🏷️</span> タグで絞って送信</h2>
+    <form action="{{ url_for('send_segmented') }}" method="post">
+        <label for="tag">対象タグ</label>
+        <input type="text" id="tag" name="tag" placeholder="例: coupon">
+        <label for="message_segmented">メッセージ内容</label>
+        <textarea id="message_segmented" name="message" placeholder="このタグを持つ人にだけメッセージが送られます" rows="4"></textarea>
+        <button type="submit">このタグを持つ人に送信</button>
+    </form>
+</div>
+
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">📣</span> 全員にメッセージを送信</h2>
+    <form action="{{ url_for('send_broadcast') }}" method="post">
+        <label for="message_broadcast">メッセージ内容</label>
+        <textarea id="message_broadcast" name="message" placeholder="全ての友だちにメッセージが送られます" rows="4"></textarea>
+        <button type="submit">全員に送信</button>
+    </form>
+</div>
+{% endblock %}
