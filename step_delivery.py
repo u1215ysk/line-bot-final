@@ -42,6 +42,14 @@ class StepMessage(Base):
     days_after = Column(Integer, nullable=False)
     message_text = Column(Text, nullable=False)
 
+class Message(Base):
+    __tablename__ = 'messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False)
+    sender_type = Column(String, nullable=False)  # 'user' or 'admin'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
 try:
     engine = create_engine(database_url)
     Session = sessionmaker(bind=engine)

@@ -1,0 +1,27 @@
+{% extends "layout.html" %}
+{% block title %}個別トーク{% endblock %}
+{% block header %}個別トーク{% endblock %}
+{% block content %}
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">💬</span> 会話一覧</h2>
+    <p>クリックすると、各ユーザーとのトーク履歴が見れます。</p>
+    <table>
+        <thead>
+            <tr>
+                <th>LINE表示名</th>
+                <th>ニックネーム</th>
+                <th>最終メッセージ日時</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr style="cursor: pointer;" onclick="window.location='{{ url_for('admin_chat_detail_page', user_id=user.id) }}';">
+                <td>{{ user.display_name }}</td>
+                <td>{{ user.nickname or '-' }}</td>
+                <td>(ここに最終メッセージ日時)</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

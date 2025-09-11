@@ -59,6 +59,14 @@ class Tag(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False, unique=True)
 
+class Message(Base):
+    __tablename__ = 'messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False)
+    sender_type = Column(String, nullable=False)  # 'user' or 'admin'
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
 try:
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
@@ -169,6 +177,25 @@ def admin_settings_page():
     session.close()
     return render_template('settings.html', token=token_setting, secret=secret_setting)
 
+@app.route("/admin/chat")
+@auth_required
+def admin_chat_page():
+    session = Session()
+    all_users = session.query(User).order_by(User.created_at.desc()).all()
+    session.close()
+    return render_template('chat.html', users=all_users)
+
+@app.route("/admin/chat/<user_id>")
+@auth_required
+def admin_chat_detail_page(user_id):
+    session = Session()
+    user = session.query(User).filter_by(id=user_id).first()
+    messages = session.query(Message).filter_by(user_id=user_id).order_by(Message.created_at).all()
+    session.close()
+    if not user:
+        return "ユーザーが見つかりません。", 404
+    return render_template('chat_detail.html', user=user, messages=messages)
+
 @app.route("/edit-user/<user_id>")
 @auth_required
 def edit_user_page(user_id):
@@ -178,7 +205,6 @@ def edit_user_page(user_id):
     session.close()
     if not user:
         return "ユーザーが見つかりません。", 404
-    # edit_user.htmlにall_tagsも渡す
     return render_template('edit_user.html', user=user, all_tags=all_tags)
 
 @app.route("/update-user/<user_id>", methods=['POST'])
@@ -290,9 +316,16 @@ def callback():
     def handle_message(event):
         line_bot_api = get_line_bot_api()
         if not line_bot_api: return
+
         user_id = event.source.user_id
         user_message = event.message.text
         session = Session()
+        
+        # 受信メッセージをDBに保存
+        new_message = Message(user_id=user_id, sender_type='user', content=user_message)
+        session.add(new_message)
+        session.commit()
+        
         user = session.query(User).filter_by(id=user_id).first()
         if user_message == "アンケート":
             quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
@@ -333,6 +366,7 @@ def callback():
     except InvalidSignatureError:
         abort(400)
     return 'OK'
+
 
 @app.route("/", methods=['GET'])
 def health_check():
