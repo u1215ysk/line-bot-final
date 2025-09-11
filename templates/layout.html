@@ -35,24 +35,25 @@
         input[type="text"], input[type="number"], textarea { width: 100%; padding: 10px; margin-bottom: 1em; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
 
         /* ▼▼▼ ポップアップ（モーダル）用のスタイル ▼▼▼ */
-        .modal-backdrop {
+        .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(0,0,0,0.6);
+            background: rgba(0, 0, 0, 0.6);
             display: flex; justify-content: center; align-items: center;
             z-index: 1000;
             visibility: hidden; opacity: 0;
-            transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+            transition: opacity 0.3s, visibility 0.3s;
         }
-        .modal-backdrop.is-visible {
+        .modal-overlay.is-visible {
             visibility: visible; opacity: 1;
         }
-        .modal-content {
-            background-color: white; padding: 2em; border-radius: 8px;
-            width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        .modal-container {
+            background: white; padding: 2em; border-radius: 8px;
+            width: 90%; max-width: 500px;
+            transform: translateY(-20px);
+            transition: transform 0.3s;
         }
-        .user-id-display {
-            background-color: #eee; padding: 5px; font-family: monospace;
-            word-wrap: break-word; /* はみ出し防止 */
+        .modal-overlay.is-visible .modal-container {
+            transform: translateY(0);
         }
     </style>
 </head>
@@ -60,7 +61,6 @@
     <div class="sidebar">
         <div class="sidebar-header">管理パネル</div>
         <nav class="sidebar-nav">
-            <a href="{{ url_for('admin_chat_page') }}" class="{% if request.endpoint.startswith('admin_chat') %}active{% endif %}">💬 個別トーク</a>
             <a href="{{ url_for('admin_friends_page') }}" class="{% if request.endpoint == 'admin_friends_page' or request.endpoint == 'edit_user_page' %}active{% endif %}">👥 友だち一覧</a>
             <a href="{{ url_for('admin_steps_page') }}" class="{% if request.endpoint == 'admin_steps_page' %}active{% endif %}">🗓️ ステップ配信</a>
             <a href="{{ url_for('admin_messaging_page') }}" class="{% if request.endpoint == 'admin_messaging_page' %}active{% endif %}">📣 メッセージ配信</a>
@@ -78,47 +78,66 @@
         </main>
     </div>
 
-    <div id="edit-modal-backdrop" class="modal-backdrop">
-        <div id="edit-modal-content" class="modal-content" onclick="event.stopPropagation()">
+    <div id="modal-overlay" class="modal-overlay">
+        <div id="modal-container" class="modal-container" onclick="event.stopPropagation()">
             </div>
     </div>
     <script>
-        const modalBackdrop = document.getElementById('edit-modal-backdrop');
-        const modalContent = document.getElementById('edit-modal-content');
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalContainer = document.getElementById('modal-container');
 
-        async function openEditModal(url) {
-            modalBackdrop.addEventListener('click', closeModalOnClickOutside);
+        // モーダルを開く汎用関数
+        async function openModal(url) {
             const response = await fetch(url);
-            modalContent.innerHTML = await response.text();
-            modalBackdrop.classList.add('is-visible');
-            const form = document.getElementById('edit-form');
-            form.addEventListener('submit', handleFormSubmit);
-        }
-
-        function closeModal() {
-            modalBackdrop.classList.remove('is-visible');
-            modalContent.innerHTML = '';
-            modalBackdrop.removeEventListener('click', closeModalOnClickOutside);
-        }
-
-        function closeModalOnClickOutside(event) {
-            if (event.target === modalBackdrop) {
-                closeModal();
+            if (response.ok) {
+                modalContainer.innerHTML = await response.text();
+                modalOverlay.classList.add('is-visible');
+                
+                // 動的に読み込んだフォームの送信イベントを捕捉
+                const form = modalContainer.querySelector('form');
+                if (form) {
+                    form.addEventListener('submit', handleModalFormSubmit);
+                }
+            } else {
+                alert('コンテンツの読み込みに失敗しました。');
             }
         }
 
-        async function handleFormSubmit(event) {
-            event.preventDefault();
+        // モーダルを閉じる関数
+        function closeModal() {
+            modalOverlay.classList.remove('is-visible');
+        }
+        
+        // オーバーレイのクリックでモーダルを閉じる
+        modalOverlay.addEventListener('click', closeModal);
+
+        // モーダル内のフォーム送信を処理する関数
+        async function handleModalFormSubmit(event) {
+            event.preventDefault(); // ページの再読み込みを防止
             const form = event.target;
             const formData = new FormData(form);
-            const response = await fetch(form.action, { method: 'POST', body: formData });
-            if (response.ok) {
-                window.location.reload();
-            } else {
-                alert('更新に失敗しました。');
-                closeModal();
+            
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    body: formData,
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    if (result.status === 'success') {
+                        window.location.reload(); // 成功したらページをリロードして変更を反映
+                    } else {
+                        alert(result.message || '更新に失敗しました。');
+                    }
+                } else {
+                    alert('サーバーエラーが発生しました。');
+                }
+            } catch (error) {
+                console.error('Fetch error:', error);
+                alert('通信エラーが発生しました。');
             }
         }
     </script>
-    </body>
+</body>
 </html>
