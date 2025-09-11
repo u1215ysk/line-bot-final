@@ -107,6 +107,15 @@ def admin_steps_page():
 def admin_messaging_page():
     return render_template('messaging.html')
 
+# ▼▼▼ 抜け落ちていた関数をここに追加 ▼▼▼
+@app.route("/admin/settings")
+@auth_required
+def admin_settings_page():
+    # このページはまだ作成していないので、一旦ダミーのページにリダイレクトします
+    # 将来的に'settings.html'を作成する際に、この関数を本格的に実装します
+    return redirect(url_for('admin_friends_page'))
+# ▲▲▲ ここまで追加 ▲▲▲
+
 @app.route("/edit-user/<user_id>")
 @auth_required
 def edit_user_page(user_id):
