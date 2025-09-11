@@ -5,15 +5,15 @@
 {% block content %}
 <div class="content-panel">
     <h2><span style="font-size: 1.2em;">🔧</span> LINE接続設定</h2>
-    <p>LINE Developersコンソールから取得した情報を入力してください。</p>
+    <p>LINE Developersコンソールから取得した情報を入力してください。この設定は、プログラム全体（メッセージ送受信、ステップ配信など）に影響します。</p>
     <form action="{{ url_for('admin_settings_page') }}" method="post">
-        <label for="token">Channel Access Token</label>
+        <label for="token"><strong>Channel Access Token (長期)</strong></label>
         <input type="text" id="token" name="line_channel_access_token" value="{{ token.value if token else '' }}" required>
         
-        <label for="secret">Channel Secret</label>
+        <label for="secret" style="margin-top: 1em; display: block;"><strong>Channel Secret</strong></label>
         <input type="text" id="secret" name="line_channel_secret" value="{{ secret.value if secret else '' }}" required>
         
-        <button type="submit">設定を保存</button>
+        <button type="submit" style="margin-top: 1.5em;">設定を保存</button>
     </form>
 </div>
 {% endblock %}
