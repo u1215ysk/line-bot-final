@@ -1,65 +1,32 @@
-{% extends "layout.html" %}
-{% block title %}ユーザー編集{% endblock %}
-{% block header %}ユーザー編集{% endblock %}
-
-{% block content %}
 <style>
-    .tag-checkbox-group { 
-        display: flex; 
-        flex-wrap: wrap; 
-        gap: 15px; 
-        background-color: #fff; 
-        padding: 1em; 
-        border: 1px solid var(--border-color);
-        border-radius: 4px;
-        margin-top: 0.5em;
-        margin-bottom: 1em;
-    }
-    .tag-checkbox-group label { 
-        display: flex; 
-        align-items: center; 
-        cursor: pointer; 
-        margin-right: 15px;
-    }
-    .tag-checkbox-group input { 
-        margin-right: 5px; 
-    }
-    .form-actions {
-        margin-top: 1.5em;
-        text-align: right;
-    }
-    .button-save {
-        background-color: #28a745;
-    }
-    .button-save:hover {
-        background-color: #218838;
-    }
+    #edit-form { display: flex; flex-direction: column; }
+    #edit-form label { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
+    .form-actions { margin-top: 1.5em; display: flex; justify-content: space-between; }
+    /* キャンセルボタン用のスタイルを追加 */
+    .button-cancel { background-color: #6c757d; }
+    .button-cancel:hover { background-color: #5a6268; }
 </style>
 
-<div class="content-panel">
-    <form action="{{ url_for('update_user', user_id=user.id) }}" method="post">
-        <h2><span style="font-size: 1.2em;">👤</span> ユーザー情報</h2>
-        
-        <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
-        <p><strong>ユーザーID:</strong> <span class="user-id-display">{{ user.id }}</span></p>
+<form id="edit-form" action="{{ url_for('update_user', user_id=user.id) }}" method="post">
+    <h2><span style="font-size: 1.2em;">👤</span> ユーザー編集</h2>
+    <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
+    <p><strong>ユーザーID:</strong> <span class="user-id-display">{{ user.id }}</span></p>
 
-        <label for="nickname"><strong>管理用ニックネーム:</strong></label>
-        <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">
+    <label for="nickname">管理用ニックネーム:</label>
+    <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">
 
-        <label for="tags"><strong>タグ:</strong></label>
-        <div class="tag-checkbox-group">
-            {% for tag in all_tags %}
-            <label>
-                <input type="checkbox" name="tags" value="{{ tag.name }}" {% if tag.name in user.tags %}checked{% endif %}>
-                {{ tag.name }}
-            </label>
-            {% endfor %}
-        </div>
-        
-        <div class="form-actions">
-            <a href="{{ url_for('admin_friends_page') }}" class="button" style="background-color:#6c757d; float: left;">キャンセル</a>
-            <button type="submit" class="button-save">更新</button>
-        </div>
-    </form>
-</div>
-{% endblock %}
+    <label for="tags">タグ:</label>
+    <div class="tag-checkbox-group">
+        {% for tag in all_tags %}
+        <label>
+            <input type="checkbox" name="tags" value="{{ tag.name }}" {% if tag.name in user.tags %}checked{% endif %}>
+            {{ tag.name }}
+        </label>
+        {% endfor %}
+    </div>
+    
+    <div class="form-actions">
+        <button type="button" class="button-cancel" onclick="closeModal()">キャンセル</button>
+        <button type="submit">更新</button>
+    </div>
+</form>

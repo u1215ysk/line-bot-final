@@ -33,17 +33,38 @@
         .button-delete { background-color: #dc3545; }
         .button-delete:hover { background-color: #c82333; }
         input[type="text"], input[type="number"], textarea { width: 100%; padding: 10px; margin-bottom: 1em; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+
+        /* ▼▼▼ ポップアップ（モーダル）用のスタイル ▼▼▼ */
+        .modal-backdrop {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.6);
+            display: flex; justify-content: center; align-items: center;
+            z-index: 1000;
+            visibility: hidden; opacity: 0;
+            transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
+        }
+        .modal-backdrop.is-visible {
+            visibility: visible; opacity: 1;
+        }
+        .modal-content {
+            background-color: white; padding: 2em; border-radius: 8px;
+            width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }
+        .user-id-display {
+            background-color: #eee; padding: 5px; font-family: monospace;
+            word-wrap: break-word; /* はみ出し防止 */
+        }
     </style>
 </head>
 <body>
     <div class="sidebar">
         <div class="sidebar-header">管理パネル</div>
         <nav class="sidebar-nav">
-            <a href="{{ url_for('admin_friends_page') }}" class="...">👥 友だち一覧</a>
-            <a href="{{ url_for('admin_steps_page') }}" class="...">🗓️ ステップ配信</a>
-            <a href="{{ url_for('admin_messaging_page') }}" class="...">📣 メッセージ配信</a>
+            <a href="{{ url_for('admin_friends_page') }}" class="{% if request.endpoint == 'admin_friends_page' or request.endpoint == 'edit_user_page' %}active{% endif %}">👥 友だち一覧</a>
+            <a href="{{ url_for('admin_steps_page') }}" class="{% if request.endpoint == 'admin_steps_page' %}active{% endif %}">🗓️ ステップ配信</a>
+            <a href="{{ url_for('admin_messaging_page') }}" class="{% if request.endpoint == 'admin_messaging_page' %}active{% endif %}">📣 メッセージ配信</a>
             <a href="{{ url_for('admin_tags_page') }}" class="{% if request.endpoint == 'admin_tags_page' %}active{% endif %}">🏷️ タグ管理</a>
-            <a href="{{ url_for('admin_settings_page') }}" class="...">🔧 各種設定</a>
+            <a href="{{ url_for('admin_settings_page') }}" class="{% if request.endpoint == 'admin_settings_page' %}active{% endif %}">🔧 各種設定</a>
         </nav>
     </div>
 
@@ -55,5 +76,48 @@
             {% block content %}{% endblock %}
         </main>
     </div>
-</body>
+
+    <div id="edit-modal-backdrop" class="modal-backdrop">
+        <div id="edit-modal-content" class="modal-content" onclick="event.stopPropagation()">
+            </div>
+    </div>
+    <script>
+        const modalBackdrop = document.getElementById('edit-modal-backdrop');
+        const modalContent = document.getElementById('edit-modal-content');
+
+        async function openEditModal(url) {
+            modalBackdrop.addEventListener('click', closeModalOnClickOutside);
+            const response = await fetch(url);
+            modalContent.innerHTML = await response.text();
+            modalBackdrop.classList.add('is-visible');
+            const form = document.getElementById('edit-form');
+            form.addEventListener('submit', handleFormSubmit);
+        }
+
+        function closeModal() {
+            modalBackdrop.classList.remove('is-visible');
+            modalContent.innerHTML = '';
+            modalBackdrop.removeEventListener('click', closeModalOnClickOutside);
+        }
+
+        function closeModalOnClickOutside(event) {
+            if (event.target === modalBackdrop) {
+                closeModal();
+            }
+        }
+
+        async function handleFormSubmit(event) {
+            event.preventDefault();
+            const form = event.target;
+            const formData = new FormData(form);
+            const response = await fetch(form.action, { method: 'POST', body: formData });
+            if (response.ok) {
+                window.location.reload();
+            } else {
+                alert('更新に失敗しました。');
+                closeModal();
+            }
+        }
+    </script>
+    </body>
 </html>
