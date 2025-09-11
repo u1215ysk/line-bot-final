@@ -43,6 +43,8 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
+    display_name = Column(String) # ▼ 追加 ▼
+    nickname = Column(String)     # ▼ 追加 ▼
     tags = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
@@ -114,13 +116,15 @@ def edit_user_page(user_id):
         return "ユーザーが見つかりません。", 404
     return render_template('edit_user.html', user=user)
 
-@app.route("/update-user-tags/<user_id>", methods=['POST'])
+@app.route("/update-user/<user_id>", methods=['POST'])
 @auth_required
-def update_user_tags(user_id):
+def update_user(user_id):
+    new_nickname = request.form['nickname']
     new_tags = request.form['tags']
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
     if user:
+        user.nickname = new_nickname
         user.tags = new_tags
         session.commit()
     session.close()
@@ -163,14 +167,28 @@ def callback():
 
 @handler.add(FollowEvent)
 def handle_follow(event):
-    session = Session()
     user_id = event.source.user_id
+    session = Session()
+
+    # プロフィール情報を取得
+    try:
+        profile = line_bot_api.get_profile(user_id)
+        display_name = profile.display_name
+    except LineBotApiError as e:
+        print(f"!!! プロフィール取得でエラー: {e}")
+        display_name = "取得失敗"
+
+    # ユーザーが既に存在するか確認
     existing_user = session.query(User).filter_by(id=user_id).first()
     if not existing_user:
-        new_user = User(id=user_id)
+        new_user = User(
+            id=user_id,
+            display_name=display_name
+        )
         session.add(new_user)
         session.commit()
-        print(f"新しいユーザーが追加されました: {user_id}")
+        print(f"新しいユーザーが追加されました: {user_id} ({display_name})")
+
     session.close()
 
 @handler.add(MessageEvent, message=TextMessage)

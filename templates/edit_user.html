@@ -1,32 +1,21 @@
 <!DOCTYPE html>
 <html lang="ja">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ユーザー編集</title>
-    <style>
-        body { font-family: sans-serif; margin: 2em; color: #333; }
-        .container { max-width: 600px; margin: auto; }
-        h1 { color: #333; border-bottom: 2px solid #007bff; padding-bottom: 10px; }
-        .user-id { background-color: #eee; padding: 5px; font-family: monospace; }
-        input[type="text"] { width: 100%; padding: 8px; margin-top: 1em; margin-bottom: 1em; box-sizing: border-box; }
-        button { padding: 10px 20px; background-color: #28a745; color: white; border: none; cursor: pointer; border-radius: 4px; }
-        button:hover { background-color: #218838; }
-        a { color: #007bff; }
-    </style>
-</head>
 <body>
     <div class="container">
         <h1>ユーザー編集</h1>
         <p><strong>ユーザーID:</strong> <span class="user-id">{{ user.id }}</span></p>
+        <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
 
-        <form action="{{ url_for('update_user_tags', user_id=user.id) }}" method="post">
+        <form action="{{ url_for('update_user', user_id=user.id) }}" method="post">
+            <label for="nickname">管理用ニックネーム:</label>
+            <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">
+
             <label for="tags">タグ (カンマ区切りで入力):</label>
             <input type="text" id="tags" name="tags" value="{{ user.tags }}">
             <button type="submit">更新</button>
         </form>
 
-        <p><a href="{{ url_for('admin_page') }}">&laquo; 管理画面に戻る</a></p>
+        <p><a href="{{ url_for('admin_friends_page') }}">&laquo; 友だち一覧に戻る</a></p>
     </div>
 </body>
 </html>

@@ -7,7 +7,8 @@
 <table>
     <thead>
         <tr>
-            <th>ユーザーID</th>
+            <th>LINE表示名</th>
+            <th>ニックネーム</th>
             <th>タグ</th>
             <th>登録日時</th>
             <th>操作</th>
@@ -16,7 +17,8 @@
     <tbody>
         {% for user in users %}
         <tr>
-            <td>{{ user.id }}</td>
+            <td>{{ user.display_name }}</td>
+            <td>{{ user.nickname }}</td>
             <td>{{ user.tags }}</td>
             <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td>
             <td><a href="{{ url_for('edit_user_page', user_id=user.id) }}">編集</a></td>
@@ -24,5 +26,4 @@
         {% endfor %}
     </tbody>
 </table>
-
 {% endblock %}
