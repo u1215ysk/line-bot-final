@@ -1,26 +1,35 @@
+{% extends "layout.html" %}
+{% block title %}ユーザー編集{% endblock %}
+{% block header %}ユーザー編集{% endblock %}
+
+{% block content %}
 <style>
-    /* ポップアップ内のスタイル */
-    #edit-form { display: flex; flex-direction: column; }
-    #edit-form label { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
-    #edit-form input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
-    .form-actions { margin-top: 1.5em; text-align: right; }
-    .form-actions button { padding: 10px 20px; border-radius: 4px; border: none; cursor: pointer; }
-    .button-save { background-color: #28a745; color: white; }
-    .button-save:hover { background-color: #218838; }
+    .tag-checkbox-group { display: flex; flex-wrap: wrap; gap: 15px; }
+    .tag-checkbox-group label { display: flex; align-items: center; cursor: pointer; }
+    .tag-checkbox-group input { margin-right: 5px; }
 </style>
+<div class="content-panel">
+    <form action="{{ url_for('update_user', user_id=user.id) }}" method="post">
+        <h2><span style="font-size: 1.2em;">👤</span> ユーザー情報</h2>
+        <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
 
-<form id="edit-form" action="{{ url_for('update_user', user_id=user.id) }}" method="post">
-    <h2><span style="font-size: 1.2em;">👤</span> ユーザー編集</h2>
-    
-    <p><strong>LINE表示名:</strong> {{ user.display_name }}</p>
+        <label for="nickname">管理用ニックネーム:</label>
+        <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">
 
-    <label for="nickname">管理用ニックネーム:</label>
-    <input type="text" id="nickname" name="nickname" value="{{ user.nickname or '' }}">
-
-    <label for="tags">タグ (カンマ区切り):</label>
-    <input type="text" id="tags" name="tags" value="{{ user.tags }}">
-    
-    <div class="form-actions">
-        <button type="submit" class="button-save">更新</button>
-    </div>
-</form>
+        <label for="tags">タグ:</label>
+        <div class="tag-checkbox-group">
+            {% for tag in all_tags %}
+            <label>
+                <input type="checkbox" name="tags" value="{{ tag.name }}" {% if tag.name in user.tags %}checked{% endif %}>
+                {{ tag.name }}
+            </label>
+            {% endfor %}
+        </div>
+        
+        <div style="margin-top: 1.5em; text-align: right;">
+            <button type="submit" class="button-save">更新</button>
+        </div>
+    </form>
+    <a href="{{ url_for('admin_friends_page') }}">&laquo; 友だち一覧に戻る</a>
+</div>
+{% endblock %}

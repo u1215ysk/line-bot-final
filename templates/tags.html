@@ -1,0 +1,38 @@
+{% extends "layout.html" %}
+{% block title %}タグ管理{% endblock %}
+{% block header %}タグ管理{% endblock %}
+
+{% block content %}
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">🏷️</span> 登録済みタグ一覧</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>タグ名</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tag in tags %}
+            <tr>
+                <td>{{ tag.name }}</td>
+                <td>
+                    <form action="{{ url_for('delete_tag', tag_id=tag.id) }}" method="post" onsubmit="return confirm('本当に削除しますか？');">
+                        <button type="submit" class="button-delete">削除</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">➕</span> 新しいタグを追加</h2>
+    <form action="{{ url_for('admin_tags_page') }}" method="post">
+        <label for="tag_name">タグ名</label>
+        <input type="text" id="tag_name" name="tag_name" required>
+        <button type="submit">タグ追加</button>
+    </form>
+</div>
+{% endblock %}

@@ -54,6 +54,11 @@ class Setting(Base):
     key = Column(String, primary_key=True)
     value = Column(Text)
 
+class Tag(Base):
+    __tablename__ = 'tags'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, nullable=False, unique=True)
+
 try:
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
@@ -116,6 +121,34 @@ def admin_steps_page():
 @auth_required
 def admin_messaging_page():
     return render_template('messaging.html')
+    
+@app.route("/admin/tags", methods=['GET', 'POST'])
+@auth_required
+def admin_tags_page():
+    session = Session()
+    if request.method == 'POST':
+        tag_name = request.form.get('tag_name')
+        if tag_name:
+            existing_tag = session.query(Tag).filter_by(name=tag_name).first()
+            if not existing_tag:
+                new_tag = Tag(name=tag_name)
+                session.add(new_tag)
+                session.commit()
+        return redirect(url_for('admin_tags_page'))
+    all_tags = session.query(Tag).order_by(Tag.name).all()
+    session.close()
+    return render_template('tags.html', tags=all_tags)
+
+@app.route("/delete-tag/<int:tag_id>", methods=['POST'])
+@auth_required
+def delete_tag(tag_id):
+    session = Session()
+    tag_to_delete = session.query(Tag).filter_by(id=tag_id).first()
+    if tag_to_delete:
+        session.delete(tag_to_delete)
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_tags_page'))
 
 @app.route("/admin/settings", methods=['GET', 'POST'])
 @auth_required
@@ -141,10 +174,11 @@ def admin_settings_page():
 def edit_user_page(user_id):
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
+    all_tags = session.query(Tag).all()
     session.close()
     if not user:
         return "ユーザーが見つかりません。", 404
-    return render_template('edit_user.html', user=user)
+    return render_template('edit_user.html', user=user, all_tags=all_tags)
 
 @app.route("/update-user/<user_id>", methods=['POST'])
 @auth_required
@@ -152,8 +186,9 @@ def update_user(user_id):
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
     if user:
-        user.nickname = request.form['nickname']
-        user.tags = request.form['tags']
+        user.nickname = request.form.get('nickname')
+        selected_tags = request.form.getlist('tags')
+        user.tags = ",".join(selected_tags) + ("," if selected_tags else "")
         session.commit()
     session.close()
     return redirect(url_for('admin_friends_page'))
@@ -254,12 +289,10 @@ def callback():
     def handle_message(event):
         line_bot_api = get_line_bot_api()
         if not line_bot_api: return
-
         user_id = event.source.user_id
         user_message = event.message.text
         session = Session()
         user = session.query(User).filter_by(id=user_id).first()
-
         if user_message == "アンケート":
             quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
             reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
@@ -273,7 +306,6 @@ def callback():
                 reply_text = "ご回答ありがとうございます！"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         elif user_message == "いいえ":
-            # ▼▼▼ ここの行が正しく修正されています ▼▼▼
             if user and "unsatisfied" not in user.tags:
                 user.tags += "unsatisfied,"
                 session.commit()
@@ -300,7 +332,6 @@ def callback():
     except InvalidSignatureError:
         abort(400)
     return 'OK'
-
 
 @app.route("/", methods=['GET'])
 def health_check():
