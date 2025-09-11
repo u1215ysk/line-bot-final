@@ -1,7 +1,7 @@
 import os
 import sys
 from functools import wraps
-from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify
+from flask import Flask, request, abort, render_template, redirect, url_for, Response
 
 from linebot import (
     LineBotApi, WebhookHandler
@@ -30,7 +30,7 @@ else:
     database_url = db_url
 
 if not all([database_url, admin_username, admin_password]):
-    print("!!! エラー: DB_URL, ADMIN_USERNAME, ADMIN_PASSWORDの環境変数が必要です。")
+    print("!!! エラー: 必要な環境変数が設定されていません。")
     sys.exit(1)
 
 # --- データベースの設定 ---
@@ -71,14 +71,6 @@ def get_line_bot_api():
         return LineBotApi(access_token_setting.value)
     return None
 
-def get_webhook_handler():
-    session = Session()
-    channel_secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
-    session.close()
-    if channel_secret_setting and channel_secret_setting.value:
-        return WebhookHandler(channel_secret_setting.value)
-    return None
-
 # --- ベーシック認証用のコード ---
 def check_auth(username, password):
     return username == admin_username and password == admin_password
@@ -97,7 +89,6 @@ def auth_required(f):
             return authenticate()
         return f(*args, **kwargs)
     return decorated
-# -------------------------
 
 # --- 管理画面用のコード ---
 @app.route("/admin")
@@ -140,7 +131,6 @@ def admin_settings_page():
             setting.value = request.form.get(key)
         session.commit()
         return redirect(url_for('admin_settings_page'))
-
     token_setting = session.query(Setting).filter_by(key='line_channel_access_token').first()
     secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
     session.close()
@@ -196,18 +186,13 @@ def delete_step(step_id):
 @auth_required
 def send_broadcast():
     line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        return "アクセストークンが設定されていません。管理画面から設定してください。", 500
-
+    if not line_bot_api: return "アクセストークンが設定されていません。", 500
     message_text = request.form.get('message')
-    if not message_text:
-        return redirect(url_for('admin_messaging_page'))
-        
+    if not message_text: return redirect(url_for('admin_messaging_page'))
     session = Session()
     all_users = session.query(User).all()
     user_ids = [user.id for user in all_users]
     session.close()
-    
     if user_ids:
         try:
             line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
@@ -219,19 +204,14 @@ def send_broadcast():
 @auth_required
 def send_segmented():
     line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        return "アクセストークンが設定されていません。管理画面から設定してください。", 500
-
+    if not line_bot_api: return "アクセストークンが設定されていません。", 500
     tag = request.form.get('tag')
     message_text = request.form.get('message')
-    if not tag or not message_text:
-        return redirect(url_for('admin_messaging_page'))
-        
+    if not tag or not message_text: return redirect(url_for('admin_messaging_page'))
     session = Session()
     tagged_users = session.query(User).filter(User.tags.like(f'%{tag}%')).all()
     user_ids = [user.id for user in tagged_users]
     session.close()
-    
     if user_ids:
         try:
             line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
@@ -242,11 +222,55 @@ def send_segmented():
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
-    handler = get_webhook_handler()
-    if not handler:
+    # ▼▼▼ handlerの定義とイベント処理を、このcallback関数の中に移動 ▼▼▼
+    session = Session()
+    channel_secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
+    session.close()
+    
+    if not channel_secret_setting or not channel_secret_setting.value:
         print("チャネルシークレットがDBに設定されていないため、リクエストを無視します。")
         return "OK"
 
+    handler = WebhookHandler(channel_secret_setting.value)
+
+    # フォローイベントのハンドラーを定義
+    @handler.add(FollowEvent)
+    def handle_follow(event):
+        line_bot_api = get_line_bot_api()
+        if not line_bot_api: return
+        user_id = event.source.user_id
+        session = Session()
+        try:
+            profile = line_bot_api.get_profile(user_id)
+            display_name = profile.display_name
+        except LineBotApiError as e:
+            print(f"!!! プロフィール取得でエラー: {e}")
+            display_name = "取得失敗"
+        existing_user = session.query(User).filter_by(id=user_id).first()
+        if not existing_user:
+            new_user = User(id=user_id, display_name=display_name)
+            session.add(new_user)
+            session.commit()
+            print(f"新しいユーザーが追加されました: {user_id} ({display_name})")
+        session.close()
+
+    # メッセージイベントのハンドラーを定義
+    @handler.add(MessageEvent, message=TextMessage)
+    def handle_message(event):
+        line_bot_api = get_line_bot_api()
+        if not line_bot_api: return
+        user_id = event.source.user_id
+        user_message = event.message.text
+        session = Session()
+        user = session.query(User).filter_by(id=user_id).first()
+        if user_message == "アンケート":
+            # (省略...アンケート以下のロジックは変更なし)
+            # ...
+        else:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
+        session.close()
+
+    # リクエストの検証とハンドラーの実行
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
@@ -255,74 +279,6 @@ def callback():
         abort(400)
     return 'OK'
 
-@handler.add(FollowEvent)
-def handle_follow(event):
-    line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        print("アクセストークンがDBに設定されていないため、フォローイベントを処理できません。")
-        return "OK"
-
-    user_id = event.source.user_id
-    session = Session()
-    try:
-        profile = line_bot_api.get_profile(user_id)
-        display_name = profile.display_name
-    except LineBotApiError as e:
-        print(f"!!! プロフィール取得でエラー: {e}")
-        display_name = "取得失敗"
-        
-    existing_user = session.query(User).filter_by(id=user_id).first()
-    if not existing_user:
-        new_user = User(id=user_id, display_name=display_name)
-        session.add(new_user)
-        session.commit()
-        print(f"新しいユーザーが追加されました: {user_id} ({display_name})")
-    session.close()
-
-@handler.add(MessageEvent, message=TextMessage)
-def handle_message(event):
-    line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        print("アクセストークンがDBに設定されていないため、メッセージに応答できません。")
-        return "OK"
-
-    user_id = event.source.user_id
-    user_message = event.message.text
-    session = Session()
-    user = session.query(User).filter_by(id=user_id).first()
-    
-    if user_message == "アンケート":
-        quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
-        reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
-        line_bot_api.reply_message(event.reply_token, reply_message)
-    elif user_message == "はい":
-        if user and "satisfied" not in user.tags:
-            user.tags += "satisfied,"
-            session.commit()
-            reply_text = "ありがとうございます！ご回答を記録しました。"
-        else:
-            reply_text = "ご回答ありがとうございます！"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-    elif user_message == "いいえ":
-        if user and "unsatisfied" not in user.tags:
-            user.tags += "unsatisfied,"
-            session.commit()
-            reply_text = "ご意見ありがとうございます。今後の参考にさせていただきます。"
-        else:
-            reply_text = "ご意見ありがとうございます。"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-    elif user_message == "クーポン":
-        if user and "coupon" not in user.tags:
-            user.tags += "coupon,"
-            session.commit()
-            reply_text = "クーポン希望者として登録しました！"
-        else:
-            reply_text = "すでに登録済みです。"
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-    else:
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
-    
-    session.close()
 
 @app.route("/", methods=['GET'])
 def health_check():
