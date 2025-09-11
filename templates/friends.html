@@ -23,7 +23,7 @@
                 <td>{{ user.nickname or '-' }}</td>
                 <td>{{ user.tags or '-' }}</td>
                 <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td><button onclick="openEditModal('{{ url_for('edit_user_page', user_id=user.id) }}')">編集</button></td>
+                <td><button onclick="openEditModal('{{ url_for('edit_user_page', user_id=user.id) }}')" class="button" style="background-color:#6c757d;">編集</button></td>
             </tr>
             {% endfor %}
         </tbody>
@@ -32,73 +32,61 @@
 
 <style>
     .modal-backdrop {
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        background-color: rgba(0, 0, 0, 0.6);
-        /* ▼▼▼ 表示をflexに変更し、中央寄せを確実にします ▼▼▼ */
-        display: flex;
-        justify-content: center;
-        align-items: center;
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background-color: rgba(0,0,0,0.6);
+        display: flex; justify-content: center; align-items: center;
         z-index: 1000;
-        /* 最初は非表示にしておく */
-        visibility: hidden;
-        opacity: 0;
+        visibility: hidden; opacity: 0;
         transition: opacity 0.2s ease-in-out, visibility 0.2s ease-in-out;
     }
-    /* 表示状態のスタイル */
     .modal-backdrop.is-visible {
-        visibility: visible;
-        opacity: 1;
+        visibility: visible; opacity: 1;
     }
     .modal-content {
-        background-color: white;
-        padding: 2em;
-        border-radius: 8px;
-        width: 90%;
-        max-width: 500px;
-        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
-    }
-    /* ▼▼▼ ユーザーIDがはみ出さないように、強制的に改行させます ▼▼▼ */
-    .user-id-display {
-        background-color: #eee;
-        padding: 5px;
-        font-family: monospace;
-        word-wrap: break-word; /* はみ出し防止 */
+        background-color: white; padding: 2em; border-radius: 8px;
+        width: 90%; max-width: 500px; box-shadow: 0 5px 15px rgba(0,0,0,0.3);
     }
 </style>
 
-<div id="edit-modal-backdrop" class="modal-backdrop" onclick="closeEditModal(event)">
+<div id="edit-modal-backdrop" class="modal-backdrop">
     <div id="edit-modal-content" class="modal-content" onclick="event.stopPropagation()">
         </div>
 </div>
+
 <script>
     const modalBackdrop = document.getElementById('edit-modal-backdrop');
     const modalContent = document.getElementById('edit-modal-content');
 
     // モーダルを開く関数
     async function openEditModal(url) {
-        const response = await fetch(url); // 編集ページのHTMLを裏で取得
-        modalContent.innerHTML = await response.text();
-        modalBackdrop.style.display = 'flex';
+        // 背景をクリックで閉じられるようにイベントリスナーを追加
+        modalBackdrop.addEventListener('click', closeModalOnClickOutside);
         
-        // フォームの送信を乗っ取る
+        const response = await fetch(url);
+        modalContent.innerHTML = await response.text();
+        modalBackdrop.classList.add('is-visible');
+        
         const form = document.getElementById('edit-form');
         form.addEventListener('submit', handleFormSubmit);
     }
 
     // モーダルを閉じる関数
-    function closeEditModal(event) {
+    function closeModal() {
+        modalBackdrop.classList.remove('is-visible');
+        modalContent.innerHTML = ''; // 中身を空にする
+        modalBackdrop.removeEventListener('click', closeModalOnClickOutside);
+    }
+    
+    // 背景クリックでモーダルを閉じる
+    function closeModalOnClickOutside(event) {
         if (event.target === modalBackdrop) {
-            modalBackdrop.style.display = 'none';
+            closeModal();
         }
     }
     
     // フォーム送信時の処理
     async function handleFormSubmit(event) {
-        event.preventDefault(); // 通常のページ遷移を停止
+        event.preventDefault();
         const form = event.target;
         const formData = new FormData(form);
         
@@ -108,10 +96,10 @@
         });
         
         if (response.ok) {
-            // 成功したら、ページ全体をリロードして変更を反映
-            window.location.reload();
+            window.location.reload(); // 成功したらページをリロードして変更を反映
         } else {
             alert('更新に失敗しました。');
+            closeModal();
         }
     }
 </script>
