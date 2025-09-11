@@ -14,7 +14,7 @@ from linebot.models import (
     QuickReply, QuickReplyButton, MessageAction
 )
 
-from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text
+from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text, or_
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 app = Flask(__name__)
@@ -114,9 +114,18 @@ def admin_dashboard():
 @auth_required
 def admin_friends_page():
     session = Session()
-    all_users = session.query(User).order_by(User.created_at.desc()).all()
+    search_query = request.args.get('q', '')
+    query = session.query(User)
+    if search_query:
+        query = query.filter(
+            or_(
+                User.display_name.like(f'%{search_query}%'),
+                User.nickname.like(f'%{search_query}%')
+            )
+        )
+    all_users = query.order_by(User.created_at.desc()).all()
     session.close()
-    return render_template('friends.html', users=all_users)
+    return render_template('friends.html', users=all_users, search_query=search_query)
 
 @app.route("/admin/steps")
 @auth_required
@@ -183,15 +192,31 @@ def admin_settings_page():
 def admin_chat_page():
     session = Session()
     status_filter = request.args.get('status')
+    search_query = request.args.get('q', '')
     query = session.query(User)
     if status_filter:
         query = query.filter(User.status == status_filter)
+    if search_query:
+        query = query.join(Message, User.id == Message.user_id).filter(
+            or_(
+                User.display_name.like(f'%{search_query}%'),
+                User.nickname.like(f'%{search_query}%'),
+                Message.content.like(f'%{search_query}%')
+            )
+        ).distinct()
     all_users = query.order_by(User.created_at.desc()).all()
-    latest_message_subq = session.query(Message.user_id, func.max(Message.created_at).label('max_created_at')).group_by(Message.user_id).subquery()
-    latest_messages_q = session.query(Message).join(latest_message_subq, (Message.user_id == latest_message_subq.c.user_id) & (Message.created_at == latest_message_subq.c.max_created_at))
+    latest_message_subq = session.query(
+        Message.user_id,
+        func.max(Message.created_at).label('max_created_at')
+    ).group_by(Message.user_id).subquery()
+    latest_messages_q = session.query(Message).join(
+        latest_message_subq,
+        (Message.user_id == latest_message_subq.c.user_id) &
+        (Message.created_at == latest_message_subq.c.max_created_at)
+    )
     latest_messages = {msg.user_id: msg for msg in latest_messages_q}
     session.close()
-    return render_template('chat.html', users=all_users, current_filter=status_filter, latest_messages=latest_messages)
+    return render_template('chat.html', users=all_users, current_filter=status_filter, search_query=search_query, latest_messages=latest_messages)
 
 @app.route("/admin/chat/<user_id>")
 @auth_required
@@ -224,7 +249,6 @@ def send_reply(user_id):
     session.close()
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
-# ▼▼▼ 抜け落ちていた関数をここに追加 ▼▼▼
 @app.route("/update-status/<user_id>", methods=['POST'])
 @auth_required
 def update_status(user_id):
@@ -236,7 +260,6 @@ def update_status(user_id):
         session.commit()
     session.close()
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-# ▲▲▲ ここまで追加 ▲▲▲
 
 @app.route("/edit-user/<user_id>")
 @auth_required

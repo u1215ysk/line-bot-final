@@ -5,21 +5,13 @@
 {% block content %}
 <div class="content-panel">
     <h2><span style="font-size: 1.2em;">👥</span> 登録ユーザー</h2>
+
+    <form method="get" action="{{ url_for('admin_friends_page') }}" style="margin-bottom: 1em;">
+        <input type="text" name="q" placeholder="表示名、ニックネームで検索..." value="{{ search_query or '' }}">
+        <button type="submit">検索</button>
+    </form>
     <p>現在 {{ users|length }} 人の友だちがいます。</p>
     <table>
-        <tbody>
-            {% for user in users %}
-            <tr>
-                <td>{{ user.display_name }}</td>
-                <td>{{ user.nickname or '-' }}</td>
-                <td>{{ user.tags or '-' }}</td>
-                <td>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                <td>
-                    <button onclick="openModal('{{ url_for('edit_user_page', user_id=user.id) }}')">編集</button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+        </table>
 </div>
 {% endblock %}
