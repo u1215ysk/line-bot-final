@@ -222,18 +222,15 @@ def send_segmented():
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
-    # ▼▼▼ handlerの定義とイベント処理を、このcallback関数の中に移動 ▼▼▼
     session = Session()
     channel_secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
     session.close()
-    
     if not channel_secret_setting or not channel_secret_setting.value:
         print("チャネルシークレットがDBに設定されていないため、リクエストを無視します。")
         return "OK"
 
     handler = WebhookHandler(channel_secret_setting.value)
 
-    # フォローイベントのハンドラーを定義
     @handler.add(FollowEvent)
     def handle_follow(event):
         line_bot_api = get_line_bot_api()
@@ -254,23 +251,53 @@ def callback():
             print(f"新しいユーザーが追加されました: {user_id} ({display_name})")
         session.close()
 
-    # メッセージイベントのハンドラーを定義
     @handler.add(MessageEvent, message=TextMessage)
     def handle_message(event):
         line_bot_api = get_line_bot_api()
         if not line_bot_api: return
+
         user_id = event.source.user_id
         user_message = event.message.text
         session = Session()
         user = session.query(User).filter_by(id=user_id).first()
+
         if user_message == "アンケート":
-            # (省略...アンケート以下のロジックは変更なし)
-            # ...
+            quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
+            reply_message = TextSendMessage(text="サービスに満足していますか？", quick_reply=quick_reply_buttons)
+            line_bot_api.reply_message(event.reply_token, reply_message)
+        elif user_message == "はい":
+            if user and "satisfied" not in user.tags:
+                user.tags += "satisfied,"
+                session.commit()
+                reply_text = "ありがとうございます！ご回答を記録しました。"
+            else:
+                reply_text = "ご回答ありがとうございます！"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        elif user_message == "いいえ":
+            if user and "unsatisfied" not in user.tags:
+                user.tags += "unsatisfied,"
+                session.commit()
+                reply_text = "ご意見ありがとうございます。今後の参考にさせていただきます。"
+            else:
+                reply_text = "ご意見ありがとうございます。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
+        elif user_message == "クーポン":
+            if user and "coupon" not in user.tags:
+                user.tags += "coupon,"
+                session.commit()
+                reply_text = "クーポン希望者として登録しました！"
+            else:
+                reply_text = "すでに登録済みです。"
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
         else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
+            # ▼▼▼ 抜け落ちていたオウム返しの処理をここに追加 ▼▼▼
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=user_message)
+            )
+        
         session.close()
 
-    # リクエストの検証とハンドラーの実行
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
     try:
@@ -279,10 +306,9 @@ def callback():
         abort(400)
     return 'OK'
 
-
 @app.route("/", methods=['GET'])
 def health_check():
-    return 'OK', 200
+    return 'OK'
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
