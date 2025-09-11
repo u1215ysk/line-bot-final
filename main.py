@@ -197,6 +197,7 @@ def admin_chat_page():
     if status_filter:
         query = query.filter(User.status == status_filter)
     if search_query:
+        # distinct() を使って、同じユーザーが複数回ヒットしないようにする
         query = query.join(Message, User.id == Message.user_id).filter(
             or_(
                 User.display_name.like(f'%{search_query}%'),
