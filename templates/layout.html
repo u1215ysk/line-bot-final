@@ -42,6 +42,7 @@
             <a href="{{ url_for('admin_friends_page') }}" class="{% if request.endpoint == 'admin_friends_page' or request.endpoint == 'edit_user_page' %}active{% endif %}">👥 友だち一覧</a>
             <a href="{{ url_for('admin_steps_page') }}" class="{% if request.endpoint == 'admin_steps_page' %}active{% endif %}">🗓️ ステップ配信</a>
             <a href="{{ url_for('admin_messaging_page') }}" class="{% if request.endpoint == 'admin_messaging_page' %}active{% endif %}">📣 メッセージ配信</a>
+            <a href="{{ url_for('admin_settings_page') }}" class="{% if request.endpoint == 'admin_settings_page' %}active{% endif %}">🔧 各種設定</a>
         </nav>
     </div>
 

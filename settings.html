@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block title %}各種設定{% endblock %}
+{% block header %}各種設定{% endblock %}
+
+{% block content %}
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">🔧</span> LINE接続設定</h2>
+    <p>LINE Developersコンソールから取得した情報を入力してください。</p>
+    <form action="{{ url_for('admin_settings_page') }}" method="post">
+        <label for="token">Channel Access Token</label>
+        <input type="text" id="token" name="line_channel_access_token" value="{{ token.value if token else '' }}" required>
+        
+        <label for="secret">Channel Secret</label>
+        <input type="text" id="secret" name="line_channel_secret" value="{{ secret.value if secret else '' }}" required>
+        
+        <button type="submit">設定を保存</button>
+    </form>
+</div>
+{% endblock %}
