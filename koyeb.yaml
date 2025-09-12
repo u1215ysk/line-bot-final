@@ -1,51 +1,45 @@
 # Koyebのサービス設定ファイル
 
-# アプリケーションの名前
+# アプリケーションの名前 (あなたのKoyeb上のApp名に合わせてください)
 name: line-bot-final-app
 
 # このファイルで定義するサービスの一覧
 services:
-  # 1. Webサービス（LINEからの通知を受け取る）
+  # 1. Webサービス（LINEからの通知や管理画面を受け取る）
   - name: web
-    # Dockerfileを使ってビルド
     docker:
       dockerfile: Dockerfile
-    # インスタンスタイプ（無料枠）
     instance_type: free
-    # 公開するポート番号
     ports:
       - port: 8080
         protocol: http
-    # ヘルスチェックの設定
     health_checks:
       - path: "/"
         port: 8080
         protocol: http
 
-  # 2. Workerサービス（ステップ配信をスケジュール実行）
+  # 2. Workerサービス（ステップ配信・予約投稿を実行）
   - name: step-delivery-worker
-    # Dockerfileを使ってビルド
     docker:
       dockerfile: Dockerfile
-      # 実行するコマンドを上書き
       command: python step_delivery.py
-    # インスタンスタイプ（無料枠）
     instance_type: free
-    # 実行スケジュール（毎分）
-    cron: "* * * * *"
+    cron: "* * * * *" # 毎分実行
 
 # 全てのサービスで共通して使う環境変数
 env:
+  # ▼▼▼ 秘密ではない情報はここに直接記述 ▼▼▼
   - key: PYTHON_VERSION
     value: "3.11.9"
   - key: ADMIN_USERNAME
     value: "admin" # あなたが設定したユーザー名に変更してください
-  # ▼▼▼ 以下の4つは、Koyebの「Secret」機能から読み込みます ▼▼▼
-  - key: LINE_CHANNEL_ACCESS_TOKEN
-    secret: "LINE_CHANNEL_ACCESS_TOKEN"
-  - key: LINE_CHANNEL_SECRET
-    secret: "LINE_CHANNEL_SECRET"
+
+  # ▼▼▼ 秘密情報は、Koyebの「Secret」機能から名前で参照 ▼▼▼
   - key: DATABASE_URL
     secret: "DATABASE_URL"
   - key: ADMIN_PASSWORD
     secret: "ADMIN_PASSWORD"
+  - key: LINE_CHANNEL_ACCESS_TOKEN
+    secret: "LINE_CHANNEL_ACCESS_TOKEN"
+  - key: LINE_CHANNEL_SECRET
+    secret: "LINE_CHANNEL_SECRET"
