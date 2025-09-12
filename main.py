@@ -1,7 +1,8 @@
 import os
 import sys
 from functools import wraps
-from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify # jsonify をインポートリストに追加
+from datetime import datetime
+from flask import Flask, request, abort, render_template, redirect, url_for, Response
 
 from linebot import (
     LineBotApi, WebhookHandler
@@ -74,7 +75,7 @@ class ScheduledMessage(Base):
     user_id = Column(String, nullable=False)
     message_text = Column(Text, nullable=False)
     send_at = Column(DateTime, nullable=False)
-    status = Column(String, default='pending') # 'pending', 'sent', 'error'
+    status = Column(String, default='pending')
 
 try:
     engine = create_engine(database_url)
@@ -205,7 +206,6 @@ def admin_chat_page():
     if status_filter:
         query = query.filter(User.status == status_filter)
     if search_query:
-        # distinct() を使って、同じユーザーが複数回ヒットしないようにする
         query = query.join(Message, User.id == Message.user_id).filter(
             or_(
                 User.display_name.like(f'%{search_query}%'),
@@ -257,21 +257,15 @@ def send_reply(user_id):
     session.commit()
     session.close()
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-
-from datetime import datetime # datetimeをインポートリストに追加
-
+    
 @app.route("/admin/chat/<user_id>/schedule", methods=['POST'])
 @auth_required
 def schedule_reply(user_id):
     message_text = request.form.get('message_text')
     send_at_str = request.form.get('send_at')
-
     if not message_text or not send_at_str:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-
-    # 文字列をdatetimeオブジェクトに変換
     send_at_dt = datetime.fromisoformat(send_at_str)
-
     session = Session()
     new_scheduled_message = ScheduledMessage(
         user_id=user_id,
@@ -282,8 +276,46 @@ def schedule_reply(user_id):
     session.add(new_scheduled_message)
     session.commit()
     session.close()
-
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+
+@app.route("/admin/scheduled")
+@auth_required
+def admin_scheduled_page():
+    session = Session()
+    scheduled_messages = session.query(ScheduledMessage, User.display_name).join(
+        User, ScheduledMessage.user_id == User.id
+    ).filter(ScheduledMessage.status == 'pending').order_by(ScheduledMessage.send_at).all()
+    session.close()
+    return render_template('scheduled.html', messages=scheduled_messages)
+
+@app.route("/edit-scheduled/<int:msg_id>", methods=['GET', 'POST'])
+@auth_required
+def edit_scheduled_page(msg_id):
+    session = Session()
+    message_to_edit = session.query(ScheduledMessage).filter_by(id=msg_id).first()
+    if not message_to_edit:
+        return "メッセージが見つかりません。", 404
+    if request.method == 'POST':
+        message_to_edit.message_text = request.form.get('message_text')
+        send_at_str = request.form.get('send_at')
+        if send_at_str:
+            message_to_edit.send_at = datetime.fromisoformat(send_at_str)
+        session.commit()
+        session.close()
+        return redirect(url_for('admin_scheduled_page'))
+    session.close()
+    return render_template('edit_scheduled.html', message=message_to_edit)
+
+@app.route("/delete-scheduled/<int:msg_id>", methods=['POST'])
+@auth_required
+def delete_scheduled(msg_id):
+    session = Session()
+    message_to_delete = session.query(ScheduledMessage).filter_by(id=msg_id).first()
+    if message_to_delete:
+        session.delete(message_to_delete)
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_scheduled_page'))
 
 @app.route("/update-status/<user_id>", methods=['POST'])
 @auth_required
@@ -319,7 +351,6 @@ def update_user(user_id):
         user.tags = ",".join(selected_tags) + ("," if selected_tags else "")
         session.commit()
     session.close()
-    # 応答をJSON形式にすることで、JavaScript側でリロードを制御する
     return jsonify({'status': 'success'})
 
 @app.route("/add-step", methods=['POST'])

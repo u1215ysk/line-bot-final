@@ -1,0 +1,40 @@
+{% extends "layout.html" %}
+{% block title %}予約投稿管理{% endblock %}
+{% block header %}予約投稿管理{% endblock %}
+{% block content %}
+<div class="content-panel">
+    <h2><span style="font-size: 1.2em;">📫</span> 予約中のメッセージ</h2>
+    <p>現在 {{ messages|length }} 件のメッセージが予約されています。</p>
+    <table>
+        <thead>
+            <tr>
+                <th>送信先ユーザー</th>
+                <th>メッセージ内容</th>
+                <th>予約日時</th>
+                <th colspan="2">操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for message, display_name in messages %}
+            <tr>
+                <td>{{ display_name }}</td>
+                <td>{{ message.message_text|truncate(30) }}</td>
+                <td>{{ message.send_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    <a href="{{ url_for('edit_scheduled_page', msg_id=message.id) }}" class="button" style="background-color:#6c757d;">編集</a>
+                </td>
+                <td>
+                    <form action="{{ url_for('delete_scheduled', msg_id=message.id) }}" method="post" onsubmit="return confirm('本当に削除しますか？');">
+                        <button type="submit" class="button-delete">削除</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" style="text-align: center;">予約中のメッセージはありません。</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
