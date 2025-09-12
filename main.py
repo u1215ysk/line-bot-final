@@ -68,6 +68,14 @@ class Message(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime, server_default=func.now())
 
+class ScheduledMessage(Base):
+    __tablename__ = 'scheduled_messages'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(String, nullable=False)
+    message_text = Column(Text, nullable=False)
+    send_at = Column(DateTime, nullable=False)
+    status = Column(String, default='pending') # 'pending', 'sent', 'error'
+
 try:
     engine = create_engine(database_url)
     Base.metadata.create_all(engine)
@@ -248,6 +256,33 @@ def send_reply(user_id):
     session.add(new_message)
     session.commit()
     session.close()
+    return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+
+from datetime import datetime # datetimeをインポートリストに追加
+
+@app.route("/admin/chat/<user_id>/schedule", methods=['POST'])
+@auth_required
+def schedule_reply(user_id):
+    message_text = request.form.get('message_text')
+    send_at_str = request.form.get('send_at')
+
+    if not message_text or not send_at_str:
+        return redirect(url_for('admin_chat_detail_page', user_id=user_id))
+
+    # 文字列をdatetimeオブジェクトに変換
+    send_at_dt = datetime.fromisoformat(send_at_str)
+
+    session = Session()
+    new_scheduled_message = ScheduledMessage(
+        user_id=user_id,
+        message_text=message_text,
+        send_at=send_at_dt,
+        status='pending'
+    )
+    session.add(new_scheduled_message)
+    session.commit()
+    session.close()
+
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
 @app.route("/update-status/<user_id>", methods=['POST'])

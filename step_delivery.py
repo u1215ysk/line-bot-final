@@ -9,7 +9,7 @@ from linebot.exceptions import LineBotApiError
 from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-print("--- ステップ配信バッチ開始 ---")
+print("--- ステップ配信・予約投稿バッチ開始 ---")
 
 # --- 環境変数から設定を取得 ---
 channel_access_token = os.environ.get('LINE_CHANNEL_ACCESS_TOKEN')
@@ -30,11 +30,11 @@ Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
     id = Column(String, primary_key=True)
-    display_name = Column(String) # ▼ 追加 ▼
-    nickname = Column(String)     # ▼ 追加 ▼    
+    display_name = Column(String)
+    nickname = Column(String)
     tags = Column(String, default="")
-    status = Column(String, default="未対応") # ▼ 追加 ▼
-    sent_steps = Column(String, default="") # 送信済みステップを記録 (例: "1,3,")
+    status = Column(String, default="未対応")
+    sent_steps = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -43,13 +43,13 @@ class StepMessage(Base):
     days_after = Column(Integer, nullable=False)
     message_text = Column(Text, nullable=False)
 
-class Message(Base):
-    __tablename__ = 'messages'
+class ScheduledMessage(Base):
+    __tablename__ = 'scheduled_messages'
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, nullable=False)
-    sender_type = Column(String, nullable=False)  # 'user' or 'admin'
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime, server_default=func.now())
+    message_text = Column(Text, nullable=False)
+    send_at = Column(DateTime, nullable=False)
+    status = Column(String, default='pending')
 
 try:
     engine = create_engine(database_url)
@@ -60,11 +60,15 @@ except Exception as e:
     print(f"!!! データベース接続でエラー: {e}")
     sys.exit(1)
 
-# --- ▼▼▼ 配信ロジックを「送信済みチェック機能付き」にアップグレード ▼▼▼ ---
-def main():
+# --- 配信ロジック ---
+def process_step_messages(session, line_bot_api):
+    print("--- ステップ配信のチェック開始 ---")
     today = datetime.utcnow().date()
     scenarios = session.query(StepMessage).all()
-    print(f"{len(scenarios)}件のシナリオをデータベースから取得しました。")
+
+    if not scenarios:
+        print("処理すべきステップ配信シナリオはありません。")
+        return
 
     for scenario in scenarios:
         target_date = today - timedelta(days=scenario.days_after)
@@ -74,7 +78,6 @@ def main():
             continue
 
         users_to_send = []
-        # 送信対象の中から、まだこのステップを送られていない人だけを絞り込む
         for user in target_users:
             sent_steps_list = user.sent_steps.split(',')
             if str(scenario.days_after) not in sent_steps_list:
@@ -86,18 +89,51 @@ def main():
                 print(f"登録{scenario.days_after}日後の{len(user_ids_to_send)}人にメッセージを送信します...")
                 line_bot_api.multicast(user_ids_to_send, TextSendMessage(text=scenario.message_text))
                 
-                # 送信成功後、データベースに「送信済み」の記録を付ける
                 for user in users_to_send:
                     user.sent_steps += f"{scenario.days_after},"
                 session.commit()
                 print("送信記録をデータベースに保存しました。")
-
             except LineBotApiError as e:
-                print(f"!!! シナリオ(ID: {scenario.id})のメッセージ送信でエラー: {e}")
-                session.rollback() # 送信に失敗した場合は、記録を付けない
+                print(f"!!! ステップ配信(ID: {scenario.id})の送信でエラー: {e}")
+                session.rollback()
 
+def process_scheduled_messages(session, line_bot_api):
+    print("--- 予約投稿のチェック開始 ---")
+    now = datetime.utcnow()
+    
+    messages_to_send = session.query(ScheduledMessage).filter(
+        ScheduledMessage.status == 'pending',
+        ScheduledMessage.send_at <= now
+    ).all()
+
+    if not messages_to_send:
+        print("送信すべき予約投稿はありません。")
+        return
+
+    for msg in messages_to_send:
+        try:
+            print(f"予約投稿を送信します (To: {msg.user_id})")
+            line_bot_api.push_message(msg.user_id, TextSendMessage(text=msg.message_text))
+            msg.status = 'sent'
+        except LineBotApiError as e:
+            print(f"!!! 予約投稿(ID: {msg.id})の送信でエラー: {e}")
+            msg.status = 'error'
+    
+    session.commit()
+    print(f"{len(messages_to_send)}件の予約投稿を処理しました。")
+
+def main():
+    # 毎日午前9時(UTCの0時)にだけステップ配信を実行
+    now_utc = datetime.utcnow()
+    # 実行タイミングを少し広げ、毎分実行されるCron Jobでも確実に捉えるようにする
+    if now_utc.hour == 0 and now_utc.minute >= 0 and now_utc.minute < 5:
+         process_step_messages(session, line_bot_api)
+
+    # 予約投稿は毎分チェック
+    process_scheduled_messages(session, line_bot_api)
+    
     session.close()
-    print("--- ステップ配信バッチ終了 ---")
+    print("--- バッチ処理終了 ---")
 
 if __name__ == "__main__":
     main()

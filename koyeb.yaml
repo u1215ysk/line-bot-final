@@ -31,8 +31,8 @@ services:
       command: python step_delivery.py
     # インスタンスタイプ（無料枠）
     instance_type: free
-    # 実行スケジュール（毎日午前9時）
-    cron: "0 9 * * *"
+    # 実行スケジュール（毎分）
+    cron: "* * * * *"
 
 # 全てのサービスで共通して使う環境変数
 env:
