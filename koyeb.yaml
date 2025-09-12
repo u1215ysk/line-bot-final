@@ -24,7 +24,7 @@ services:
       dockerfile: Dockerfile
       command: python step_delivery.py
     instance_type: free
-    cron: "* * * * *" # 毎分実行
+    cron: "0 * * * *" # 毎時0分に1回実行
 
 # 全てのサービスで共通して使う環境変数
 env:
