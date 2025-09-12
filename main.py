@@ -1,8 +1,8 @@
 import os
 import sys
 from functools import wraps
-from datetime import datetime, timezone, timedelta # timezone, timedelta をインポート
-from flask import Flask, request, abort, render_template, redirect, url_for, Response
+from datetime import datetime, timezone, timedelta
+from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify
 
 from linebot import (
     LineBotApi, WebhookHandler
@@ -267,22 +267,16 @@ def schedule_reply(user_id):
     if not message_text or not send_at_str:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
     
-    # ▼▼▼ タイムゾーン変換処理 ▼▼▼
-    # フォームから送られてきた文字列を、タイムゾーン情報を持たないdatetimeオブジェクトに変換
     naive_dt = datetime.fromisoformat(send_at_str)
-    # 日本時間（JST, UTC+9）のタイムゾーン情報を定義
     jst = timezone(timedelta(hours=9))
-    # ローカル時刻をJSTとして解釈し、タイムゾーン情報を持つdatetimeオブジェクトに変換
     jst_dt = naive_dt.astimezone(jst)
-    # JST時刻を世界標準時(UTC)に変換
     utc_dt = jst_dt.astimezone(timezone.utc)
-    # ▲▲▲ ここまで ▲▲▲
 
     session = Session()
     new_scheduled_message = ScheduledMessage(
         user_id=user_id,
         message_text=message_text,
-        send_at=utc_dt, # UTCに変換した時刻を保存
+        send_at=utc_dt,
         status='pending'
     )
     session.add(new_scheduled_message)
@@ -320,7 +314,6 @@ def edit_scheduled_page(msg_id):
         session.close()
         return redirect(url_for('admin_scheduled_page'))
     
-    # DBのUTC時刻をJSTに変換して表示
     jst = timezone(timedelta(hours=9))
     message_to_edit.send_at_jst = message_to_edit.send_at.astimezone(jst)
     session.close()
@@ -507,8 +500,8 @@ def callback():
             else:
                 reply_text = "すでに登録済みです。"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        else:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=user_message))
+        # オウム返し機能は削除済み
+        
         session.close()
 
     signature = request.headers['X-Line-Signature']
