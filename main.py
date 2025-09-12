@@ -79,7 +79,7 @@ class ScheduledMessage(Base):
     status = Column(String, default='pending')
 
 try:
-    engine = create_engine(database_url)
+    engine = create_engine(database_url, pool_pre_ping=True)
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine)
 except Exception as e:

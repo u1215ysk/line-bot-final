@@ -58,7 +58,7 @@ class BatchRunLog(Base):
     last_step_check_date = Column(DateTime, nullable=False)
 
 try:
-    engine = create_engine(database_url)
+    engine = create_engine(database_url, pool_pre_ping=True)
     Base.metadata.create_all(engine) # テーブルを自動作成
     Session = sessionmaker(bind=engine)
     session = Session()
