@@ -1,7 +1,7 @@
 import os
 import sys
 from functools import wraps
-from datetime import datetime
+from datetime import datetime, timezone, timedelta # timezone, timedelta をインポート
 from flask import Flask, request, abort, render_template, redirect, url_for, Response
 
 from linebot import (
@@ -43,6 +43,7 @@ class User(Base):
     nickname = Column(String)
     tags = Column(String, default="")
     status = Column(String, default="未対応")
+    sent_steps = Column(String, default="")
     created_at = Column(DateTime, server_default=func.now())
 
 class StepMessage(Base):
@@ -265,12 +266,23 @@ def schedule_reply(user_id):
     send_at_str = request.form.get('send_at')
     if not message_text or not send_at_str:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
-    send_at_dt = datetime.fromisoformat(send_at_str)
+    
+    # ▼▼▼ タイムゾーン変換処理 ▼▼▼
+    # フォームから送られてきた文字列を、タイムゾーン情報を持たないdatetimeオブジェクトに変換
+    naive_dt = datetime.fromisoformat(send_at_str)
+    # 日本時間（JST, UTC+9）のタイムゾーン情報を定義
+    jst = timezone(timedelta(hours=9))
+    # ローカル時刻をJSTとして解釈し、タイムゾーン情報を持つdatetimeオブジェクトに変換
+    jst_dt = naive_dt.astimezone(jst)
+    # JST時刻を世界標準時(UTC)に変換
+    utc_dt = jst_dt.astimezone(timezone.utc)
+    # ▲▲▲ ここまで ▲▲▲
+
     session = Session()
     new_scheduled_message = ScheduledMessage(
         user_id=user_id,
         message_text=message_text,
-        send_at=send_at_dt,
+        send_at=utc_dt, # UTCに変換した時刻を保存
         status='pending'
     )
     session.add(new_scheduled_message)
@@ -299,10 +311,18 @@ def edit_scheduled_page(msg_id):
         message_to_edit.message_text = request.form.get('message_text')
         send_at_str = request.form.get('send_at')
         if send_at_str:
-            message_to_edit.send_at = datetime.fromisoformat(send_at_str)
+            naive_dt = datetime.fromisoformat(send_at_str)
+            jst = timezone(timedelta(hours=9))
+            jst_dt = naive_dt.astimezone(jst)
+            utc_dt = jst_dt.astimezone(timezone.utc)
+            message_to_edit.send_at = utc_dt
         session.commit()
         session.close()
         return redirect(url_for('admin_scheduled_page'))
+    
+    # DBのUTC時刻をJSTに変換して表示
+    jst = timezone(timedelta(hours=9))
+    message_to_edit.send_at_jst = message_to_edit.send_at.astimezone(jst)
     session.close()
     return render_template('edit_scheduled.html', message=message_to_edit)
 
