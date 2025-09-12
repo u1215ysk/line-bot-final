@@ -25,7 +25,7 @@ if not all([channel_access_token, database_url]):
 
 line_bot_api = LineBotApi(channel_access_token)
 
-# --- データベースのモデル定義 (main.pyと合わせる) ---
+# --- データベースのモデル定義 ---
 Base = declarative_base()
 class User(Base):
     __tablename__ = 'users'
@@ -51,8 +51,15 @@ class ScheduledMessage(Base):
     send_at = Column(DateTime, nullable=False)
     status = Column(String, default='pending')
 
+# ▼▼▼ 最後にステップ配信をチェックした日を記録するテーブル ▼▼▼
+class BatchRunLog(Base):
+    __tablename__ = 'batch_run_log'
+    id = Column(Integer, primary_key=True)
+    last_step_check_date = Column(DateTime, nullable=False)
+
 try:
     engine = create_engine(database_url)
+    Base.metadata.create_all(engine) # テーブルを自動作成
     Session = sessionmaker(bind=engine)
     session = Session()
     print("--- データベース接続完了 ---")
@@ -64,8 +71,14 @@ except Exception as e:
 def process_step_messages(session, line_bot_api):
     print("--- ステップ配信のチェック開始 ---")
     today = datetime.utcnow().date()
+    
+    # 最後にチェックした日を取得
+    log = session.query(BatchRunLog).first()
+    if log and log.last_step_check_date.date() == today:
+        print("本日のステップ配信は既にチェック済みです。")
+        return # 今日の日付で既に実行済みの場合はスキップ
+    
     scenarios = session.query(StepMessage).all()
-
     if not scenarios:
         print("処理すべきステップ配信シナリオはありません。")
         return
@@ -73,7 +86,6 @@ def process_step_messages(session, line_bot_api):
     for scenario in scenarios:
         target_date = today - timedelta(days=scenario.days_after)
         target_users = session.query(User).filter(func.date(User.created_at) == target_date).all()
-        
         if not target_users:
             continue
 
@@ -88,7 +100,6 @@ def process_step_messages(session, line_bot_api):
             try:
                 print(f"登録{scenario.days_after}日後の{len(user_ids_to_send)}人にメッセージを送信します...")
                 line_bot_api.multicast(user_ids_to_send, TextSendMessage(text=scenario.message_text))
-                
                 for user in users_to_send:
                     user.sent_steps += f"{scenario.days_after},"
                 session.commit()
@@ -97,10 +108,17 @@ def process_step_messages(session, line_bot_api):
                 print(f"!!! ステップ配信(ID: {scenario.id})の送信でエラー: {e}")
                 session.rollback()
 
+    # 最終チェック日を今日の日付で更新または新規作成
+    if log:
+        log.last_step_check_date = datetime.utcnow()
+    else:
+        new_log = BatchRunLog(last_step_check_date=datetime.utcnow())
+        session.add(new_log)
+    session.commit()
+
 def process_scheduled_messages(session, line_bot_api):
     print("--- 予約投稿のチェック開始 ---")
     now = datetime.utcnow()
-    
     messages_to_send = session.query(ScheduledMessage).filter(
         ScheduledMessage.status == 'pending',
         ScheduledMessage.send_at <= now
@@ -123,12 +141,8 @@ def process_scheduled_messages(session, line_bot_api):
     print(f"{len(messages_to_send)}件の予約投稿を処理しました。")
 
 def main():
-    # 毎日午前9時(UTCの0時)にだけステップ配信を実行
-    now_utc = datetime.utcnow()
-    # 実行タイミングを少し広げ、毎分実行されるCron Jobでも確実に捉えるようにする
-    if now_utc.hour == 0 and now_utc.minute >= 0 and now_utc.minute < 5:
-         process_step_messages(session, line_bot_api)
-
+    # ステップ配信は1日に1回だけ実行されるようにチェック
+    process_step_messages(session, line_bot_api)
     # 予約投稿は毎分チェック
     process_scheduled_messages(session, line_bot_api)
     
