@@ -284,8 +284,7 @@ def update_user(user_id):
         user.tags = ",".join(selected_tags) + ("," if selected_tags else "")
         session.commit()
     session.close()
-    
-    # ▼▼▼ 応答をJSONに変更 ▼▼▼
+    # 応答をJSON形式にすることで、JavaScript側でリロードを制御する
     return jsonify({'status': 'success'})
 
 @app.route("/add-step", methods=['POST'])
