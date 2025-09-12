@@ -78,6 +78,12 @@ class ScheduledMessage(Base):
     send_at = Column(DateTime, nullable=False)
     status = Column(String, default='pending')
 
+class BatchRunLog(Base):
+    __tablename__ = 'batch_run_log'
+    id = Column(Integer, primary_key=True)
+    last_step_check_date = Column(DateTime, nullable=False)
+
+
 try:
     engine = create_engine(database_url, pool_pre_ping=True)
     Base.metadata.create_all(engine)
@@ -113,6 +119,83 @@ def auth_required(f):
             return authenticate()
         return f(*args, **kwargs)
     return decorated
+
+# --- ▼▼▼ 執事（バッチ処理）のコードをここに統合 ▼▼▼ ---
+def process_step_messages(session, line_bot_api):
+    print("--- ステップ配信のチェック開始 ---")
+    today = datetime.utcnow().date()
+    log = session.query(BatchRunLog).first()
+    if log and log.last_step_check_date.date() == today:
+        print("本日のステップ配信は既にチェック済みです。")
+        return
+    scenarios = session.query(StepMessage).all()
+    if not scenarios:
+        print("処理すべきステップ配信シナリオはありません。")
+        return
+    for scenario in scenarios:
+        target_date = today - timedelta(days=scenario.days_after)
+        target_users = session.query(User).filter(func.date(User.created_at) == target_date).all()
+        if not target_users:
+            continue
+        users_to_send = []
+        for user in target_users:
+            sent_steps_list = user.sent_steps.split(',')
+            if str(scenario.days_after) not in sent_steps_list:
+                users_to_send.append(user)
+        if users_to_send:
+            user_ids_to_send = [user.id for user in users_to_send]
+            try:
+                print(f"登録{scenario.days_after}日後の{len(user_ids_to_send)}人にメッセージを送信します...")
+                line_bot_api.multicast(user_ids_to_send, TextSendMessage(text=scenario.message_text))
+                for user in users_to_send:
+                    user.sent_steps += f"{scenario.days_after},"
+                session.commit()
+                print("送信記録をデータベースに保存しました。")
+            except LineBotApiError as e:
+                print(f"!!! ステップ配信(ID: {scenario.id})の送信でエラー: {e}")
+                session.rollback()
+    if log:
+        log.last_step_check_date = datetime.utcnow()
+    else:
+        new_log = BatchRunLog(last_step_check_date=datetime.utcnow())
+        session.add(new_log)
+    session.commit()
+
+def process_scheduled_messages(session, line_bot_api):
+    print("--- 予約投稿のチェック開始 ---")
+    now = datetime.utcnow()
+    messages_to_send = session.query(ScheduledMessage).filter(
+        ScheduledMessage.status == 'pending',
+        ScheduledMessage.send_at <= now
+    ).all()
+    if not messages_to_send:
+        print("送信すべき予約投稿はありません。")
+        return
+    for msg in messages_to_send:
+        try:
+            print(f"予約投稿を送信します (To: {msg.user_id})")
+            line_bot_api.push_message(msg.user_id, TextSendMessage(text=msg.message_text))
+            msg.status = 'sent'
+        except LineBotApiError as e:
+            print(f"!!! 予約投稿(ID: {msg.id})の送信でエラー: {e}")
+            msg.status = 'error'
+    session.commit()
+    print(f"{len(messages_to_send)}件の予約投稿を処理しました。")
+
+@app.route("/trigger-batch")
+def trigger_batch_route():
+    line_bot_api = get_line_bot_api()
+    if not line_bot_api:
+        return "LINE API not configured.", 500
+    session = Session()
+    try:
+        process_step_messages(session, line_bot_api)
+        process_scheduled_messages(session, line_bot_api)
+    finally:
+        session.close()
+    return "Batch process triggered successfully.", 200
+# --- ▲▲▲ 執事（バッチ処理）のコード ▲▲▲ ---
+
 
 # --- 管理画面用のコード ---
 @app.route("/admin/")
@@ -390,43 +473,6 @@ def delete_step(step_id):
     session.close()
     return redirect(url_for('admin_steps_page'))
 
-@app.route("/send-broadcast", methods=['POST'])
-@auth_required
-def send_broadcast():
-    line_bot_api = get_line_bot_api()
-    if not line_bot_api: return "アクセストークンが設定されていません。", 500
-    message_text = request.form.get('message')
-    if not message_text: return redirect(url_for('admin_messaging_page'))
-    session = Session()
-    all_users = session.query(User).all()
-    user_ids = [user.id for user in all_users]
-    session.close()
-    if user_ids:
-        try:
-            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
-        except LineBotApiError as e:
-            print(f"!!! 一斉配信でエラー: {e}")
-    return redirect(url_for('admin_messaging_page'))
-
-@app.route("/send-segmented", methods=['POST'])
-@auth_required
-def send_segmented():
-    line_bot_api = get_line_bot_api()
-    if not line_bot_api: return "アクセストークンが設定されていません。", 500
-    tag = request.form.get('tag')
-    message_text = request.form.get('message')
-    if not tag or not message_text: return redirect(url_for('admin_messaging_page'))
-    session = Session()
-    tagged_users = session.query(User).filter(User.tags.like(f'%{tag}%')).all()
-    user_ids = [user.id for user in tagged_users]
-    session.close()
-    if user_ids:
-        try:
-            line_bot_api.multicast(user_ids, TextSendMessage(text=message_text))
-        except LineBotApiError as e:
-            print(f"!!! セグメント配信でエラー: {e}")
-    return redirect(url_for('admin_messaging_page'))
-
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -462,15 +508,12 @@ def callback():
     def handle_message(event):
         line_bot_api = get_line_bot_api()
         if not line_bot_api: return
-
         user_id = event.source.user_id
         user_message = event.message.text
         session = Session()
-        
         new_message = Message(user_id=user_id, sender_type='user', content=user_message)
         session.add(new_message)
         session.commit()
-        
         user = session.query(User).filter_by(id=user_id).first()
         if user_message == "アンケート":
             quick_reply_buttons = QuickReply(items=[QuickReplyButton(action=MessageAction(label="はい", text="はい")), QuickReplyButton(action=MessageAction(label="いいえ", text="いいえ"))])
@@ -500,8 +543,6 @@ def callback():
             else:
                 reply_text = "すでに登録済みです。"
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=reply_text))
-        # オウム返し機能は削除済み
-        
         session.close()
 
     signature = request.headers['X-Line-Signature']
@@ -511,7 +552,6 @@ def callback():
     except InvalidSignatureError:
         abort(400)
     return 'OK'
-
 
 @app.route("/", methods=['GET'])
 def health_check():
