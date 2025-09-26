@@ -3,23 +3,259 @@
 {% block header %}メッセージ配信{% endblock %}
 
 {% block content %}
-<div class="content-panel">
-    <h2><span style="font-size: 1.2em;">🏷️</span> タグで絞って送信</h2>
-    <form action="{{ url_for('send_segmented') }}" method="post">
-        <label for="tag">対象タグ</label>
-        <input type="text" id="tag" name="tag" placeholder="例: coupon">
-        <label for="message_segmented">メッセージ内容</label>
-        <textarea id="message_segmented" name="message" placeholder="このタグを持つ人にだけメッセージが送られます" rows="4"></textarea>
-        <button type="submit">このタグを持つ人に送信</button>
-    </form>
+<style>
+    .message-creator { display: flex; flex-direction: column; gap: 1.5em; }
+    .message-block { background-color: #fff; border: 1px solid var(--border-color); border-radius: 8px; padding: 1.5em; }
+    .message-block-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; }
+    .message-block-header h3, .message-block-header h4, .message-block-header h5 { margin: 0; }
+    .message-block select, .message-block input, .message-block textarea { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; margin-top: 0.5em; }
+    .message-block textarea { height: 100px; resize: vertical; }
+    .add-message-btn { width: 100%; padding: 15px; background-color: #e9ecef; border: 2px dashed #ced4da; cursor: pointer; text-align: center; color: #495057; font-weight: bold; margin-top: 1.5em; }
+    .add-message-btn:hover { background-color: #dde2e6; }
+    .targeting-section, .broadcast-list-section { margin-bottom: 1.5em; }
+    .tag-selection-group { display: flex; flex-wrap: wrap; gap: 10px; background-color: #fff; border: 1px solid var(--border-color); padding: 1em; border-radius: 4px; }
+    .radio-group label { margin-right: 20px; }
+    .action-group, .column-group { border-top: 1px dashed #ccc; margin-top: 1em; padding-top: 1em; }
+    .action-item, .column-item { padding: 1em; border: 1px solid #eee; border-radius: 4px; margin-bottom: 1em; background: #fdfdfd; }
+    .action-item-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1em; }
+    .image-preview { max-width: 300px; max-height: 300px; margin-top: 10px; border-radius: 4px; border: 1px solid #ccc; object-fit: contain; }
+</style>
+
+<form id="delivery-form" action="{{ url_for('send_message_from_admin') }}" method="post" enctype="multipart/form-data">
+    <div class="content-panel">
+        <h2><span style="font-size: 1.2em;">🎯</span> 配信先設定</h2>
+        <div class="radio-group">
+            <label><input type="radio" name="targeting_type" value="all" checked onchange="toggleTargeting(this.value)"> 全員に配信</label>
+            <label><input type="radio" name="targeting_type" value="segmented" onchange="toggleTargeting(this.value)"> タグで絞り込んで配信</label>
+        </div>
+        <div id="segment-options" style="display:none; margin-top: 1em;">
+            <div class="targeting-section">
+                <label><strong>含めるタグ（AND条件）</strong></label>
+                <div class="tag-selection-group">
+                    {% for tag in tags %}<label><input type="checkbox" name="include_tags" value="{{ tag.name }}"> {{ tag.name }}</label>{% endfor %}
+                </div>
+            </div>
+            <div class="targeting-section">
+                <label><strong>除外するタグ</strong></label>
+                <div class="tag-selection-group">
+                    {% for tag in tags %}<label><input type="checkbox" name="exclude_tags" value="{{ tag.name }}"> {{ tag.name }}</label>{% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="message-container" class="message-creator"></div>
+    <button type="button" class="add-message-btn" onclick="addMessageBlock()">+ メッセージを追加</button>
+    
+    <div class="content-panel" style="margin-top: 2em;">
+        <h2><span style="font-size: 1.2em;">🚀</span> 配信設定</h2>
+        <input type="text" name="broadcast_name" placeholder="管理用の配信名（任意）">
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 15px; flex-wrap: wrap; margin-top: 1em;">
+            <input type="text" id="schedule-time-picker" name="send_at" placeholder="日時を指定して予約..." style="width: auto; min-width: 180px;">
+            <button type="button" onclick="submitForm(true)" class="button" style="background-color:#17a2b8;">予約する</button>
+            <button type="button" onclick="submitForm(false)" style="padding: 12px 30px; font-size: 1.2em;">すぐに送信</button>
+        </div>
+    </div>
+</form>
+
+<div class="content-panel broadcast-list-section">
+    <h2><span style="font-size: 1.2em;">📫</span> 予約中の配信一覧</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>配信名</th>
+                <th>予約日時</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for broadcast in broadcasts %}
+            <tr>
+                <td>{{ broadcast.name }}</td>
+                <td>{{ broadcast.send_at_jst.strftime('%Y-%m-%d %H:%M') }}</td>
+                <td>
+                    <button onclick="openModal('{{ url_for('edit_broadcast_page', broadcast_id=broadcast.id) }}')" class="button" style="background-color:#6c757d;">編集</button>
+                    <form action="{{ url_for('delete_broadcast', broadcast_id=broadcast.id) }}" method="post" onsubmit="return confirm('本当に削除しますか？');" style="display: inline;">
+                        <button type="submit" class="button-delete">削除</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="3" style="text-align: center;">予約中の配信はありません。</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
 </div>
 
-<div class="content-panel">
-    <h2><span style="font-size: 1.2em;">📣</span> 全員にメッセージを送信</h2>
-    <form action="{{ url_for('send_broadcast') }}" method="post">
-        <label for="message_broadcast">メッセージ内容</label>
-        <textarea id="message_broadcast" name="message" placeholder="全ての友だちにメッセージが送られます" rows="4"></textarea>
-        <button type="submit">全員に送信</button>
-    </form>
-</div>
+<!-- ▼▼▼ JavaScriptで使うテンプレート群 ▼▼▼ -->
+<template id="message-block-template">
+    <div class="message-block">
+        <div class="message-block-header"><h3>メッセージ</h3><button type="button" class="button-delete" onclick="this.closest('.message-block').remove()">削除</button></div>
+        <select name="message_type" onchange="toggleMessageType(this)">
+            <option value="text">テキスト</option>
+            <option value="image">画像</option>
+            <option value="imagemap">イメージマップ</option>
+            <option value="button">ボタンテンプレート</option>
+            <option value="carousel">カルーセル</option>
+        </select>
+        <div class="message-content" style="margin-top: 1em;">
+            <div class="input-group text-input"><textarea name="text_content" placeholder="メッセージ内容"></textarea></div>
+            <div class="input-group image-input" style="display:none;">
+                <label>画像ファイルを選択</label>
+                <input type="file" name="image_file" accept="image/png, image/jpeg" onchange="previewImage(this)">
+                <div class="preview-container"></div>
+            </div>
+            <div class="input-group imagemap-input" style="display:none;">
+                <label>ベース画像（正方形を推奨）</label>
+                <input type="file" name="image_file" accept="image/png, image/jpeg" onchange="previewImage(this)">
+                <div class="preview-container"></div>
+                <input type="text" name="imagemap_alt_text" placeholder="通知用の説明文" required>
+                <div class="action-group">
+                    <h5>画像全体をタップした時のアクション</h5>
+                    <select name="imagemap_action_type"><option value="message">メッセージを送信</option><option value="uri">URLを開く</option></select>
+                    <input type="text" name="imagemap_action_data" placeholder="送信テキスト or URL" required>
+                </div>
+            </div>
+            <div class="input-group button-input" style="display:none;">
+                <input type="text" name="button_title" placeholder="タイトル（任意）" maxlength="40">
+                <textarea name="button_text" placeholder="本文" maxlength="160" rows="3"></textarea>
+                <div class="action-container"></div>
+                <button type="button" onclick="addAction(this, 'button')">+ アクションを追加</button>
+            </div>
+            <div class="input-group carousel-input" style="display:none;">
+                <input type="text" name="carousel_alt_text" placeholder="カルーセルの説明文" required>
+                <div class="column-container"></div>
+                <button type="button" onclick="addColumn(this)">+ カラムを追加</button>
+            </div>
+        </div>
+    </div>
+</template>
+
+<template id="carousel-column-template">
+    <div class="column-item">
+        <div class="message-block-header"><h4>カラム</h4><button type="button" class="button-delete" onclick="this.closest('.column-item').remove()">×</button></div>
+        <input type="hidden" name="column_message_index" value="">
+        <input type="text" name="column_title" placeholder="タイトル" maxlength="40">
+        <textarea name="column_text" placeholder="本文" maxlength="60" rows="3"></textarea>
+        <input type="text" name="column_image_url" placeholder="画像URL（任意, HTTPS）">
+        <div class="action-container"></div>
+        <button type="button" onclick="addAction(this, 'carousel')">+ アクションを追加</button>
+    </div>
+</template>
+
+<template id="action-item-template">
+    <div class="action-item">
+        <div class="message-block-header"><h5>アクション</h5><button type="button" class="button-delete" onclick="this.closest('.action-item').remove()">×</button></div>
+        <input type="hidden" name="action_message_index" value="">
+        <input type="hidden" name="action_column_index" value="">
+        <input type="text" name="action_label" placeholder="ボタンのラベル" required>
+        <select name="action_type"><option value="message">メッセージ</option><option value="uri">URL</option></select>
+        <input type="text" name="action_data" placeholder="送信テキスト or URL" required>
+    </div>
+</template>
+<!-- ▲▲▲ ここまで ▲▲▲ -->
 {% endblock %}
+
+{% block page_scripts %}
+<script>
+    function toggleTargeting(type) { document.getElementById('segment-options').style.display = (type === 'segmented') ? 'block' : 'none'; }
+    const messageContainer = document.getElementById('message-container');
+    const templates = {
+        message: document.getElementById('message-block-template'),
+        column: document.getElementById('carousel-column-template'),
+        action: document.getElementById('action-item-template'),
+    };
+    let messageCounter = 0;
+    let columnCounter = 0;
+
+    function addMessageBlock() {
+        if (messageContainer.children.length >= 5) { alert('一度に送信できるメッセージは5つまでです。'); return; }
+        const clone = templates.message.content.cloneNode(true);
+        clone.querySelector('.button-input').dataset.messageIndex = messageCounter;
+        clone.querySelector('.carousel-input').dataset.messageIndex = messageCounter;
+        clone.querySelector('.imagemap-input').dataset.messageIndex = messageCounter;
+        
+        // ファイル入力のname属性が一意になるようにカウンターを追加
+        clone.querySelectorAll('input[type="file"]').forEach(input => {
+            input.name = `image_file_${messageCounter}`;
+        });
+
+        messageContainer.appendChild(clone);
+        messageCounter++;
+    }
+
+    function toggleMessageType(selectElement) {
+        const block = selectElement.closest('.message-block');
+        block.querySelectorAll('.input-group').forEach(el => el.style.display = 'none');
+        block.querySelector(`.${selectElement.value}-input`).style.display = 'block';
+    }
+
+    function addColumn(button) {
+        const columnContainer = button.previousElementSibling;
+        const messageIndex = button.closest('.carousel-input').dataset.messageIndex;
+        if (columnContainer.children.length >= 10) { alert('カルーセルのカラムは10個までです。'); return; }
+        const clone = templates.column.content.cloneNode(true);
+        clone.querySelector('input[name="column_message_index"]').value = messageIndex;
+        clone.querySelector('.action-container').dataset.columnIndex = columnCounter;
+        columnContainer.appendChild(clone);
+        columnCounter++;
+    }
+
+    function addAction(button, type) {
+        const actionContainer = button.previousElementSibling;
+        const messageBlock = button.closest('.message-block');
+        const columnItem = button.closest('.column-item');
+        const messageIndex = messageBlock.querySelector('.button-input, .carousel-input').dataset.messageIndex;
+        const columnIndex = columnItem ? actionContainer.dataset.columnIndex : '-1';
+        const maxActions = (type === 'carousel') ? 3 : 4;
+        if (actionContainer.children.length >= maxActions) { alert(`アクションは${maxActions}つまでです。`); return; }
+        const clone = templates.action.content.cloneNode(true);
+        clone.querySelector('input[name="action_message_index"]').value = messageIndex;
+        clone.querySelector('input[name="action_column_index"]').value = columnIndex;
+        actionContainer.appendChild(clone);
+    }
+    
+    function previewImage(input) {
+        const previewContainer = input.nextElementSibling;
+        previewContainer.innerHTML = '';
+        if (input.files && input.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.createElement('img');
+                img.src = e.target.result;
+                img.classList.add('image-preview');
+                previewContainer.appendChild(img);
+            }
+            reader.readAsDataURL(input.files[0]);
+        }
+    }
+    
+    function submitForm(isScheduled) {
+        const form = document.getElementById('delivery-form');
+        const scheduleInput = document.getElementById('schedule-time-picker');
+        if (isScheduled) {
+            if (!scheduleInput.value) {
+                alert('予約日時を指定してください。');
+                return;
+            }
+            form.action = "{{ url_for('schedule_broadcast_from_admin') }}";
+        } else {
+            scheduleInput.value = '';
+            form.action = "{{ url_for('send_message_from_admin') }}";
+        }
+        form.submit();
+    }
+
+    flatpickr("#schedule-time-picker", {
+        enableTime: true,
+        dateFormat: "Y-m-d H:i",
+        locale: "ja",
+        minuteIncrement: 1
+    });
+
+    document.addEventListener('DOMContentLoaded', addMessageBlock);
+</script>
+{% endblock %}
+

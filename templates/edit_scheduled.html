@@ -1,6 +1,7 @@
 {% extends "layout.html" %}
 {% block title %}予約投稿の編集{% endblock %}
 {% block header %}予約投稿の編集{% endblock %}
+
 {% block content %}
 <div class="content-panel">
     <h2><span style="font-size: 1.2em;">✏️</span> 編集フォーム</h2>
@@ -9,7 +10,7 @@
         <textarea id="message_text" name="message_text" rows="5" required>{{ message.message_text }}</textarea>
         
         <label for="send_at">予約日時</label>
-        <input type="datetime-local" id="send_at" name="send_at" value="{{ message.send_at.strftime('%Y-%m-%dT%H:%M') }}" required>
+        <input type="text" id="schedule-time-picker-edit" name="send_at" value="{{ message.send_at_jst.strftime('%Y-%m-%d %H:%M') }}" required>
         
         <div style="margin-top: 1.5em; text-align: right;">
             <a href="{{ url_for('admin_scheduled_page') }}" class="button" style="background-color:#6c757d; float: left;">キャンセル</a>
@@ -17,4 +18,15 @@
         </div>
     </form>
 </div>
+{% endblock %}
+
+{% block page_scripts %}
+<script>
+    flatpickr("#schedule-time-picker-edit", {
+        enableTime: true,
+        dateFormat: "Y-m-d H:i",
+        locale: "ja",
+        minuteIncrement: 1
+    });
+</script>
 {% endblock %}

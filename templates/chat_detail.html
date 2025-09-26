@@ -14,6 +14,7 @@
         justify-content: space-between; 
         align-items: center; 
         flex-wrap: wrap;
+        gap: 1em;
     }
     .status-form select { 
         padding: 5px; 
@@ -73,14 +74,41 @@
         margin-top: 10px;
         align-items: center;
     }
-    .reply-actions input[type="datetime-local"] {
-        padding: 8px;
-        border: 1px solid #ccc;
-        border-radius: 4px;
+    .reply-actions button, .reply-actions span {
+        flex-shrink: 0;
     }
+    #schedule-time-picker {
+        width: auto;
+        min-width: 160px;
+    }
+    .scheduled-panel { border: 1px solid #ffc107; background-color: #fff3cd; border-radius: 8px; padding: 1em; margin-bottom: 2em; }
+    .scheduled-item { display: flex; justify-content: space-between; align-items: center; padding: 0.5em 0; border-bottom: 1px solid #ffeeba; }
+    .scheduled-item:last-child { border-bottom: none; }
+    .scheduled-text { flex-grow: 1; }
 </style>
 
 <div class="content-panel">
+    <div class="scheduled-panel">
+        <h4>📫 予約中のメッセージ</h4>
+        {% if scheduled_messages %}
+            {% for msg in scheduled_messages %}
+            <div class="scheduled-item">
+                <div class="scheduled-text">
+                    <strong>{{ msg.send_at.strftime('%Y-%m-%d %H:%M') }}</strong>: {{ msg.message_text|truncate(40) }}
+                </div>
+                <div>
+                    <button onclick="openModal('{{ url_for('edit_scheduled_page', msg_id=msg.id) }}')" class="button" style="background-color:#6c757d; padding: 5px 10px;">編集</button>
+                    <form action="{{ url_for('delete_scheduled', msg_id=msg.id) }}" method="post" onsubmit="return confirm('本当に削除しますか？');" style="display: inline;">
+                        <button type="submit" class="button-delete" style="padding: 5px 10px;">削除</button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        {% else %}
+            <p>このユーザーへの予約投稿はありません。</p>
+        {% endif %}
+    </div>
+
     <div class="chat-header">
         <div>
             <strong>現在のステータス:</strong> {{ user.status }}
@@ -109,23 +137,33 @@
         </div>
         <div class="reply-form">
             <form id="reply-form" action="{{ url_for('send_reply', user_id=user.id) }}" method="post">
-                <textarea name="message_text" placeholder="メッセージを入力..." rows="3"></textarea>
+                <textarea name="message_text" placeholder="メッセージを入力..." rows="3" style="width: 100%; box-sizing: border-box;"></textarea>
                 <div class="reply-actions">
                     <button type="submit">すぐに送信</button>
                     <span style="color: #666;">または</span>
-                    <input type="datetime-local" name="send_at">
+                    <input type="text" id="schedule-time-picker" name="send_at" placeholder="日時を選択...">
                     <button type="button" onclick="scheduleMessage()">予約して送信</button>
                 </div>
             </form>
         </div>
     </div>
 </div>
+{% endblock %}
 
+{% block page_scripts %}
 <script>
     function scheduleMessage() {
         const form = document.getElementById('reply-form');
         form.action = "{{ url_for('schedule_reply', user_id=user.id) }}";
         form.submit();
     }
+
+    flatpickr("#schedule-time-picker", {
+        enableTime: true,
+        dateFormat: "Y-m-d H:i",
+        locale: "ja",
+        defaultDate: new Date(),
+        minuteIncrement: 1
+    });
 </script>
 {% endblock %}

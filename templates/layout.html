@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}管理画面{% endblock %} - LINE Bot</title>
+    
+    <!-- Flatpickr（高機能カレンダー）用のCSSを読み込み -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    
     <style>
         :root {
             --sidebar-width: 240px;
@@ -34,7 +38,7 @@
         .button-delete:hover { background-color: #c82333; }
         input[type="text"], input[type="number"], textarea { width: 100%; padding: 10px; margin-bottom: 1em; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
 
-        /* ▼▼▼ ポップアップ（モーダル）用のスタイル ▼▼▼ */
+        /* ポップアップ（モーダル）用のスタイル */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0, 0, 0, 0.6);
@@ -55,6 +59,10 @@
         .modal-overlay.is-visible .modal-container {
             transform: translateY(0);
         }
+        .user-id-display {
+            background-color: #eee; padding: 5px; font-family: monospace;
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body>
@@ -66,7 +74,6 @@
             <a href="{{ url_for('admin_messaging_page') }}" class="{% if request.endpoint == 'admin_messaging_page' %}active{% endif %}">📣 メッセージ配信</a>
             <a href="{{ url_for('admin_tags_page') }}" class="{% if request.endpoint == 'admin_tags_page' %}active{% endif %}">🏷️ タグ管理</a>
             <a href="{{ url_for('admin_chat_page') }}" class="{% if request.endpoint.startswith('admin_chat') %}active{% endif %}">💬 個別トーク</a>
-            <a href="{{ url_for('admin_scheduled_page') }}" class="{% if request.endpoint.startswith('admin_scheduled') %}active{% endif %}">📫 予約投稿管理</a>
             <a href="{{ url_for('admin_settings_page') }}" class="{% if request.endpoint == 'admin_settings_page' %}active{% endif %}">🔧 各種設定</a>
         </nav>
     </div>
@@ -80,22 +87,28 @@
         </main>
     </div>
 
+    <!-- ポップアップ用のHTML -->
     <div id="modal-overlay" class="modal-overlay">
         <div id="modal-container" class="modal-container" onclick="event.stopPropagation()">
-            </div>
+            <!-- ここに編集フォームなどが読み込まれる -->
+        </div>
     </div>
+
+    <!-- Flatpickr用のJavaScriptを読み込み -->
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ja.js"></script> <!-- 日本語化用 -->
+
+    <!-- ポップアップを制御するJavaScript -->
     <script>
         const modalOverlay = document.getElementById('modal-overlay');
         const modalContainer = document.getElementById('modal-container');
 
-        // モーダルを開く汎用関数
         async function openModal(url) {
             const response = await fetch(url);
             if (response.ok) {
                 modalContainer.innerHTML = await response.text();
                 modalOverlay.classList.add('is-visible');
                 
-                // 動的に読み込んだフォームの送信イベントを捕捉
                 const form = modalContainer.querySelector('form');
                 if (form) {
                     form.addEventListener('submit', handleModalFormSubmit);
@@ -105,17 +118,14 @@
             }
         }
 
-        // モーダルを閉じる関数
         function closeModal() {
             modalOverlay.classList.remove('is-visible');
         }
         
-        // オーバーレイのクリックでモーダルを閉じる
         modalOverlay.addEventListener('click', closeModal);
 
-        // モーダル内のフォーム送信を処理する関数
         async function handleModalFormSubmit(event) {
-            event.preventDefault(); // ページの再読み込みを防止
+            event.preventDefault();
             const form = event.target;
             const formData = new FormData(form);
             
@@ -128,7 +138,7 @@
                 if (response.ok) {
                     const result = await response.json();
                     if (result.status === 'success') {
-                        window.location.reload(); // 成功したらページをリロードして変更を反映
+                        window.location.reload();
                     } else {
                         alert(result.message || '更新に失敗しました。');
                     }
@@ -141,5 +151,9 @@
             }
         }
     </script>
+    
+    <!-- ▼▼▼ ページ固有のスクリプトをここに挿入するためのブロックを追加 ▼▼▼ -->
+    {% block page_scripts %}{% endblock %}
 </body>
 </html>
+

@@ -2,7 +2,11 @@ import os
 import sys
 from functools import wraps
 from datetime import datetime, timezone, timedelta
-from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify
+import json
+from flask import Flask, request, abort, render_template, redirect, url_for, Response, jsonify, send_from_directory
+from werkzeug.utils import secure_filename
+from uuid import uuid4
+from dotenv import load_dotenv
 
 from linebot import (
     LineBotApi, WebhookHandler
@@ -12,23 +16,38 @@ from linebot.exceptions import (
 )
 from linebot.models import (
     MessageEvent, TextMessage, TextSendMessage, FollowEvent,
-    QuickReply, QuickReplyButton, MessageAction
+    QuickReply, QuickReplyButton, MessageAction, ImageSendMessage,
+    TemplateSendMessage, ButtonsTemplate, CarouselTemplate, CarouselColumn, URIAction,
+    ImagemapSendMessage, BaseSize, ImagemapArea, URIImagemapAction, MessageImagemapAction
 )
 
-from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text, or_
+from sqlalchemy import create_engine, Column, String, DateTime, func, Integer, Text, or_, and_
 from sqlalchemy.orm import sessionmaker, declarative_base
 
+# .envファイルをロード
+load_dotenv()
 app = Flask(__name__)
 
+# --- ファイルアップロードの設定 ---
+UPLOAD_FOLDER = 'static/uploads'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 # --- 環境変数から設定を取得 ---
-db_url = os.environ.get('DATABASE_URL')
+db_url_from_env = os.environ.get('DATABASE_URL')
 admin_username = os.environ.get('ADMIN_USERNAME')
 admin_password = os.environ.get('ADMIN_PASSWORD')
 
-if db_url and db_url.startswith("postgres://"):
-    database_url = db_url.replace("postgres://", "postgresql+psycopg://", 1)
+if db_url_from_env and db_url_from_env.startswith("postgres://"):
+    database_url = db_url_from_env.replace("postgres://", "postgresql+psycopg://", 1)
 else:
-    database_url = db_url
+    database_url = db_url_from_env
 
 if not all([database_url, admin_username, admin_password]):
     print("!!! エラー: 必要な環境変数が設定されていません。")
@@ -75,7 +94,16 @@ class ScheduledMessage(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String, nullable=False)
     message_text = Column(Text, nullable=False)
-    send_at = Column(DateTime, nullable=False)
+    send_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String, default='pending')
+
+class ScheduledBroadcast(Base):
+    __tablename__ = 'scheduled_broadcasts'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String, default="無題の配信")
+    targeting_info = Column(Text, nullable=False)
+    messages_info = Column(Text, nullable=False)
+    send_at = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, default='pending')
 
 class BatchRunLog(Base):
@@ -119,83 +147,11 @@ def auth_required(f):
             return authenticate()
         return f(*args, **kwargs)
     return decorated
-
-# --- ▼▼▼ 執事（バッチ処理）のコードをここに統合 ▼▼▼ ---
-def process_step_messages(session, line_bot_api):
-    print("--- ステップ配信のチェック開始 ---")
-    today = datetime.utcnow().date()
-    log = session.query(BatchRunLog).first()
-    if log and log.last_step_check_date.date() == today:
-        print("本日のステップ配信は既にチェック済みです。")
-        return
-    scenarios = session.query(StepMessage).all()
-    if not scenarios:
-        print("処理すべきステップ配信シナリオはありません。")
-        return
-    for scenario in scenarios:
-        target_date = today - timedelta(days=scenario.days_after)
-        target_users = session.query(User).filter(func.date(User.created_at) == target_date).all()
-        if not target_users:
-            continue
-        users_to_send = []
-        for user in target_users:
-            sent_steps_list = user.sent_steps.split(',')
-            if str(scenario.days_after) not in sent_steps_list:
-                users_to_send.append(user)
-        if users_to_send:
-            user_ids_to_send = [user.id for user in users_to_send]
-            try:
-                print(f"登録{scenario.days_after}日後の{len(user_ids_to_send)}人にメッセージを送信します...")
-                line_bot_api.multicast(user_ids_to_send, TextSendMessage(text=scenario.message_text))
-                for user in users_to_send:
-                    user.sent_steps += f"{scenario.days_after},"
-                session.commit()
-                print("送信記録をデータベースに保存しました。")
-            except LineBotApiError as e:
-                print(f"!!! ステップ配信(ID: {scenario.id})の送信でエラー: {e}")
-                session.rollback()
-    if log:
-        log.last_step_check_date = datetime.utcnow()
-    else:
-        new_log = BatchRunLog(last_step_check_date=datetime.utcnow())
-        session.add(new_log)
-    session.commit()
-
-def process_scheduled_messages(session, line_bot_api):
-    print("--- 予約投稿のチェック開始 ---")
-    now = datetime.utcnow()
-    messages_to_send = session.query(ScheduledMessage).filter(
-        ScheduledMessage.status == 'pending',
-        ScheduledMessage.send_at <= now
-    ).all()
-    if not messages_to_send:
-        print("送信すべき予約投稿はありません。")
-        return
-    for msg in messages_to_send:
-        try:
-            print(f"予約投稿を送信します (To: {msg.user_id})")
-            line_bot_api.push_message(msg.user_id, TextSendMessage(text=msg.message_text))
-            msg.status = 'sent'
-        except LineBotApiError as e:
-            print(f"!!! 予約投稿(ID: {msg.id})の送信でエラー: {e}")
-            msg.status = 'error'
-    session.commit()
-    print(f"{len(messages_to_send)}件の予約投稿を処理しました。")
-
-@app.route("/trigger-batch")
-def trigger_batch_route():
-    line_bot_api = get_line_bot_api()
-    if not line_bot_api:
-        return "LINE API not configured.", 500
-    session = Session()
-    try:
-        process_step_messages(session, line_bot_api)
-        process_scheduled_messages(session, line_bot_api)
-    finally:
-        session.close()
-    return "Batch process triggered successfully.", 200
-# --- ▲▲▲ 執事（バッチ処理）のコード ▲▲▲ ---
-
+    
+# --- アップロードされたファイルを配信するための関数 ---
+@app.route('/uploads/<filename>')
+def uploaded_file(filename):
+    return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
 # --- 管理画面用のコード ---
 @app.route("/admin/")
@@ -231,7 +187,19 @@ def admin_steps_page():
 @app.route("/admin/messaging")
 @auth_required
 def admin_messaging_page():
-    return render_template('messaging.html')
+    session = Session()
+    all_tags = session.query(Tag).order_by(Tag.name).all()
+    scheduled_broadcasts = session.query(ScheduledBroadcast).filter(
+        ScheduledBroadcast.status == 'pending'
+    ).order_by(ScheduledBroadcast.send_at).all()
+    
+    jst = timezone(timedelta(hours=9))
+    for broadcast in scheduled_broadcasts:
+        # DBから取得したUTC時刻を、正しくJSTに変換
+        broadcast.send_at_jst = broadcast.send_at.astimezone(jst)
+
+    session.close()
+    return render_template('messaging.html', tags=all_tags, broadcasts=scheduled_broadcasts)
     
 @app.route("/admin/tags", methods=['GET', 'POST'])
 @auth_required
@@ -317,10 +285,13 @@ def admin_chat_detail_page(user_id):
     session = Session()
     user = session.query(User).filter_by(id=user_id).first()
     messages = session.query(Message).filter_by(user_id=user_id).order_by(Message.created_at).all()
+    scheduled_messages = session.query(ScheduledMessage).filter_by(
+        user_id=user_id, status='pending'
+    ).order_by(ScheduledMessage.send_at).all()
     session.close()
     if not user:
         return "ユーザーが見つかりません。", 404
-    return render_template('chat_detail.html', user=user, messages=messages)
+    return render_template('chat_detail.html', user=user, messages=messages, scheduled_messages=scheduled_messages)
 
 @app.route("/admin/chat/<user_id>/send", methods=['POST'])
 @auth_required
@@ -350,9 +321,13 @@ def schedule_reply(user_id):
     if not message_text or not send_at_str:
         return redirect(url_for('admin_chat_detail_page', user_id=user_id))
     
-    naive_dt = datetime.fromisoformat(send_at_str)
+    try:
+        naive_dt = datetime.strptime(send_at_str, '%Y-%m-%d %H:%M')
+    except ValueError:
+        return "日時の形式が正しくありません。", 400
+
     jst = timezone(timedelta(hours=9))
-    jst_dt = naive_dt.astimezone(jst)
+    jst_dt = naive_dt.replace(tzinfo=jst)
     utc_dt = jst_dt.astimezone(timezone.utc)
 
     session = Session()
@@ -367,38 +342,37 @@ def schedule_reply(user_id):
     session.close()
     return redirect(url_for('admin_chat_detail_page', user_id=user_id))
 
-@app.route("/admin/scheduled")
-@auth_required
-def admin_scheduled_page():
-    session = Session()
-    scheduled_messages = session.query(ScheduledMessage, User.display_name).join(
-        User, ScheduledMessage.user_id == User.id
-    ).filter(ScheduledMessage.status == 'pending').order_by(ScheduledMessage.send_at).all()
-    session.close()
-    return render_template('scheduled.html', messages=scheduled_messages)
-
 @app.route("/edit-scheduled/<int:msg_id>", methods=['GET', 'POST'])
 @auth_required
 def edit_scheduled_page(msg_id):
     session = Session()
     message_to_edit = session.query(ScheduledMessage).filter_by(id=msg_id).first()
     if not message_to_edit:
+        session.close()
         return "メッセージが見つかりません。", 404
+
+    user_id_for_redirect = message_to_edit.user_id
+    jst = timezone(timedelta(hours=9))
+    
     if request.method == 'POST':
         message_to_edit.message_text = request.form.get('message_text')
         send_at_str = request.form.get('send_at')
         if send_at_str:
-            naive_dt = datetime.fromisoformat(send_at_str)
-            jst = timezone(timedelta(hours=9))
-            jst_dt = naive_dt.astimezone(jst)
-            utc_dt = jst_dt.astimezone(timezone.utc)
-            message_to_edit.send_at = utc_dt
+            try:
+                naive_dt = datetime.strptime(send_at_str, '%Y-%m-%d %H:%M')
+                jst_dt = naive_dt.replace(tzinfo=jst)
+                utc_dt = jst_dt.astimezone(timezone.utc)
+                message_to_edit.send_at = utc_dt
+            except ValueError:
+                return "日時の形式が正しくありません。", 400
         session.commit()
         session.close()
-        return redirect(url_for('admin_scheduled_page'))
+        return jsonify({'status': 'success'})
+
+    utc_dt = message_to_edit.send_at.replace(tzinfo=timezone.utc)
+    jst_dt = utc_dt.astimezone(jst)
+    message_to_edit.send_at_jst = jst_dt
     
-    jst = timezone(timedelta(hours=9))
-    message_to_edit.send_at_jst = message_to_edit.send_at.astimezone(jst)
     session.close()
     return render_template('edit_scheduled.html', message=message_to_edit)
 
@@ -407,11 +381,74 @@ def edit_scheduled_page(msg_id):
 def delete_scheduled(msg_id):
     session = Session()
     message_to_delete = session.query(ScheduledMessage).filter_by(id=msg_id).first()
+    user_id_for_redirect = message_to_delete.user_id if message_to_delete else None
     if message_to_delete:
         session.delete(message_to_delete)
         session.commit()
     session.close()
-    return redirect(url_for('admin_scheduled_page'))
+    if user_id_for_redirect:
+        return redirect(url_for('admin_chat_detail_page', user_id=user_id_for_redirect))
+    return redirect(url_for('admin_chat_page'))
+
+@app.route("/edit-broadcast/<int:broadcast_id>", methods=['GET', 'POST'])
+@auth_required
+def edit_broadcast_page(broadcast_id):
+    session = Session()
+    broadcast_to_edit = session.query(ScheduledBroadcast).filter_by(id=broadcast_id).first()
+    if not broadcast_to_edit:
+        session.close()
+        return "予約配信が見つかりません。", 404
+
+    jst = timezone(timedelta(hours=9))
+    if request.method == 'POST':
+        broadcast_to_edit.name = request.form.get('name')
+        send_at_str = request.form.get('send_at')
+        if send_at_str:
+            try:
+                naive_dt = datetime.strptime(send_at_str, '%Y-%m-%d %H:%M')
+                jst_dt = naive_dt.replace(tzinfo=jst)
+                utc_dt = jst_dt.astimezone(timezone.utc)
+                broadcast_to_edit.send_at = utc_dt
+            except ValueError:
+                return "日時の形式が正しくありません。", 400
+        
+        messages_info = json.loads(broadcast_to_edit.messages_info)
+        new_text = request.form.get('message_text')
+        if 'text_contents' in messages_info and new_text is not None:
+            if messages_info['text_contents']:
+                messages_info['text_contents'][0] = new_text
+            else:
+                 messages_info['text_contents'].append(new_text)
+            broadcast_to_edit.messages_info = json.dumps(messages_info)
+
+        session.commit()
+        session.close()
+        return jsonify({'status': 'success'})
+
+    broadcast_to_edit.send_at_jst = broadcast_to_edit.send_at.astimezone(jst)
+    
+    try:
+        messages_info = json.loads(broadcast_to_edit.messages_info)
+        if messages_info.get('message_types') and messages_info.get('text_contents'):
+            broadcast_to_edit.message_text = messages_info.get('text_contents')[0]
+        else:
+            broadcast_to_edit.message_text = "(画像やカルーセルを含むため、編集できません)"
+    except (json.JSONDecodeError, IndexError):
+        broadcast_to_edit.message_text = ""
+
+    session.close()
+    return render_template('edit_broadcast.html', broadcast=broadcast_to_edit)
+
+@app.route("/delete-broadcast/<int:broadcast_id>", methods=['POST'])
+@auth_required
+def delete_broadcast(broadcast_id):
+    session = Session()
+    broadcast_to_delete = session.query(ScheduledBroadcast).filter_by(id=broadcast_id).first()
+    if broadcast_to_delete:
+        session.delete(broadcast_to_delete)
+        session.commit()
+    session.close()
+    return redirect(url_for('admin_messaging_page'))
 
 @app.route("/update-status/<user_id>", methods=['POST'])
 @auth_required
@@ -473,6 +510,188 @@ def delete_step(step_id):
     session.close()
     return redirect(url_for('admin_steps_page'))
 
+def build_messages_from_form(request_form, request_files):
+    messages_to_send = []
+    message_types = request_form.getlist('message_type')
+    text_contents = request_form.getlist('text_content')
+    uploaded_files = request_files
+    imagemap_alt_texts = request_form.getlist('imagemap_alt_text')
+    imagemap_action_types = request_form.getlist('imagemap_action_type')
+    imagemap_action_data = request_form.getlist('imagemap_action_data')
+    button_titles = request_form.getlist('button_title')
+    button_texts = request_form.getlist('button_text')
+    carousel_alt_texts = request_form.getlist('carousel_alt_text')
+    action_message_indices = request_form.getlist('action_message_index', type=int)
+    action_labels = request_form.getlist('action_label')
+    action_types = request_form.getlist('action_type')
+    action_data = request_form.getlist('action_data')
+    column_message_indices = request_form.getlist('column_message_index', type=int)
+    column_titles = request_form.getlist('column_title')
+    column_texts = request_form.getlist('column_text')
+    column_image_urls = request_form.getlist('column_image_url')
+    action_column_indices = request_form.getlist('action_column_index', type=int)
+    text_idx, file_idx, button_idx, carousel_idx, imagemap_idx, action_idx, column_idx = 0, 0, 0, 0, 0, 0, 0
+    for i, msg_type in enumerate(message_types):
+        if len(messages_to_send) >= 5: break
+        if msg_type == 'text':
+            if text_idx < len(text_contents) and text_contents[text_idx]:
+                messages_to_send.append(TextSendMessage(text=text_contents[text_idx]))
+            text_idx += 1
+        elif msg_type == 'image' or msg_type == 'imagemap':
+            file_key = f'image_file_{i}'
+            if file_key in request_files:
+                file = request_files[file_key]
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(f"{uuid4().hex}.png")
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    image_url = url_for('uploaded_file', filename=filename, _external=True)
+                    if '127.0.0.1' in image_url or 'localhost' in image_url:
+                        ngrok_url = os.environ.get('NGROK_URL')
+                        if ngrok_url:
+                            image_url = ngrok_url + url_for('uploaded_file', filename=filename)
+                        else:
+                             image_url = image_url.replace('http://', 'https://')
+                    
+                    if msg_type == 'image':
+                        messages_to_send.append(ImageSendMessage(original_content_url=image_url, preview_image_url=image_url))
+                    else:
+                        alt_text = imagemap_alt_texts[imagemap_idx] if imagemap_idx < len(imagemap_alt_texts) else "画像メッセージ"
+                        action_type = imagemap_action_types[imagemap_idx] if imagemap_idx < len(imagemap_action_types) else 'message'
+                        action_data = imagemap_action_data[imagemap_idx] if imagemap_idx < len(imagemap_action_data) else ''
+                        action = None
+                        area = ImagemapArea(x=0, y=0, width=1040, height=1040)
+                        if action_type == 'uri' and action_data.startswith('http'):
+                            action = URIImagemapAction(link_uri=action_data, area=area)
+                        elif action_type == 'message' and action_data:
+                             action = MessageImagemapAction(text=action_data, area=area)
+                        if action:
+                            message = ImagemapSendMessage(base_url=image_url, alt_text=alt_text, base_size=BaseSize(height=1040, width=1040), actions=[action])
+                            messages_to_send.append(message)
+                        imagemap_idx += 1
+            file_idx += 1
+        elif msg_type == 'button':
+            actions = []
+            num_actions = action_message_indices.count(i)
+            for _ in range(num_actions):
+                 if len(actions) >= 4: break
+                 if action_idx < len(action_labels):
+                    label = action_labels[action_idx]
+                    action_type = action_types[action_idx]
+                    data = action_data[action_idx]
+                    if action_type == 'uri' and data.startswith('http'): actions.append(URIAction(label=label, uri=data))
+                    elif action_type == 'message': actions.append(MessageAction(label=label, text=data))
+                 action_idx += 1
+            if actions:
+                template = ButtonsTemplate(
+                    title=button_titles[button_idx] if button_idx < len(button_titles) and button_titles[button_idx] else None,
+                    text=button_texts[button_idx] if button_idx < len(button_texts) else " ",
+                    actions=actions
+                )
+                messages_to_send.append(TemplateSendMessage(alt_text='ボタンメッセージ', template=template))
+            button_idx += 1
+        elif msg_type == 'carousel':
+            columns = []
+            num_columns = column_message_indices.count(i)
+            for _ in range(num_columns):
+                if len(columns) >= 10: break
+                actions = []
+                num_actions = action_column_indices.count(column_idx)
+                for _ in range(num_actions):
+                    if len(actions) >= 3: break
+                    if action_idx < len(action_labels):
+                        label = action_labels[action_idx]
+                        action_type = action_types[action_idx]
+                        data = action_data[action_idx]
+                        if action_type == 'uri' and data.startswith('http'): actions.append(URIAction(label=label, uri=data))
+                        elif action_type == 'message': actions.append(MessageAction(label=label, text=data))
+                    action_idx += 1
+                column = CarouselColumn(
+                    thumbnail_image_url=column_image_urls[column_idx] if column_idx < len(column_image_urls) and column_image_urls[column_idx] else None,
+                    title=column_titles[column_idx] if column_idx < len(column_titles) else None,
+                    text=column_texts[column_idx] if column_idx < len(column_texts) else " ",
+                    actions=actions
+                )
+                columns.append(column)
+                column_idx += 1
+            if columns:
+                alt_text = carousel_alt_texts[carousel_idx] if carousel_idx < len(carousel_alt_texts) and carousel_alt_texts[carousel_idx] else "カルーセル"
+                template = CarouselTemplate(columns=columns)
+                messages_to_send.append(TemplateSendMessage(alt_text=alt_text, template=template))
+            carousel_idx += 1
+    return messages_to_send
+
+@app.route("/send-message-from-admin", methods=['POST'])
+@auth_required
+def send_message_from_admin():
+    line_bot_api = get_line_bot_api()
+    if not line_bot_api: return "アクセストークンが設定されていません。", 500
+    targeting_type = request.form.get('targeting_type')
+    include_tags = request.form.getlist('include_tags')
+    exclude_tags = request.form.getlist('exclude_tags')
+    session = Session()
+    query = session.query(User)
+    if targeting_type == 'segmented' and (include_tags or exclude_tags):
+        if include_tags: query = query.filter(and_(*[User.tags.like(f'%{tag}%') for tag in include_tags]))
+        if exclude_tags: query = query.filter(and_(*[User.tags.notlike(f'%{tag}%') for tag in exclude_tags]))
+    users = query.all()
+    user_ids = [user.id for user in users]
+    session.close()
+    if not user_ids: return redirect(url_for('admin_messaging_page'))
+    messages_to_send = build_messages_from_form(request.form, request.files)
+    if user_ids and messages_to_send:
+        try:
+            for i in range(0, len(user_ids), 150):
+                line_bot_api.multicast(user_ids[i:i+150], messages_to_send)
+        except LineBotApiError as e:
+            print(f"!!! 配信でエラー: {e}")
+    return redirect(url_for('admin_messaging_page'))
+
+@app.route("/schedule-message-from-admin", methods=['POST'])
+@auth_required
+def schedule_broadcast_from_admin():
+    messages_info = {'files': {}}
+    for i, msg_type in enumerate(request.form.getlist('message_type')):
+        if msg_type in ['image', 'imagemap']:
+            file_key = f'image_file_{i}'
+            if file_key in request.files:
+                file = request.files[file_key]
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(f"{uuid4().hex}.png")
+                    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+                    file.save(filepath)
+                    messages_info['files'][file_key] = filename
+
+    targeting_info = {
+        'targeting_type': request.form.get('targeting_type'),
+        'include_tags': request.form.getlist('include_tags'),
+        'exclude_tags': request.form.getlist('exclude_tags'),
+    }
+    messages_info.update({key: request.form.getlist(key) for key in request.form if key != 'send_at'})
+    
+    send_at_str = request.form.get('send_at')
+    name = request.form.get('broadcast_name', '無題の配信')
+    if not send_at_str: return "予約日時が指定されていません。", 400
+    try:
+        naive_dt = datetime.strptime(send_at_str, '%Y-%m-%d %H:%M')
+    except ValueError:
+        return "日時の形式が正しくありません。", 400
+    jst = timezone(timedelta(hours=9))
+    jst_dt = naive_dt.replace(tzinfo=jst)
+    utc_dt = jst_dt.astimezone(timezone.utc)
+    session = Session()
+    new_broadcast = ScheduledBroadcast(
+        name=name,
+        targeting_info=json.dumps(targeting_info),
+        messages_info=json.dumps(messages_info),
+        send_at=utc_dt,
+        status='pending'
+    )
+    session.add(new_broadcast)
+    session.commit()
+    session.close()
+    return redirect(url_for('admin_messaging_page'))
+
 # --- LINE Bot本体の機能 ---
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -480,7 +699,6 @@ def callback():
     channel_secret_setting = session.query(Setting).filter_by(key='line_channel_secret').first()
     session.close()
     if not channel_secret_setting or not channel_secret_setting.value:
-        print("チャネルシークレットがDBに設定されていないため、リクエストを無視します。")
         return "OK"
     handler = WebhookHandler(channel_secret_setting.value)
 
